@@ -1,0 +1,12 @@
+# .NET
+bin/
+obj/
+*.user
+.vs/
+.idea/
+TestResults/
+*.swp
+
+# Local environment (keep the example)
+.env
+!.env.example

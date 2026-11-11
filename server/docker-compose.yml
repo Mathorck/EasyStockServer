@@ -1,0 +1,37 @@
+services:
+  db:
+    image: postgres:16-alpine
+    restart: unless-stopped
+    environment:
+      POSTGRES_DB: easystock
+      POSTGRES_USER: easystock
+      POSTGRES_PASSWORD: ${POSTGRES_PASSWORD:?set POSTGRES_PASSWORD in .env}
+    volumes:
+      - pgdata:/var/lib/postgresql/data
+    healthcheck:
+      test: ["CMD-SHELL", "pg_isready -U easystock -d easystock"]
+      interval: 10s
+      timeout: 5s
+      retries: 5
+
+  server:
+    image: ghcr.io/mathorck/easystock-server:latest
+    build: .
+    restart: unless-stopped
+    depends_on:
+      db:
+        condition: service_healthy
+    environment:
+      EASYSTOCK_DB: Host=db;Database=easystock;Username=easystock;Password=${POSTGRES_PASSWORD}
+      EASYSTOCK_PUBLIC_URL: ${EASYSTOCK_PUBLIC_URL:?set EASYSTOCK_PUBLIC_URL in .env}
+      EASYSTOCK_CERT_FINGERPRINT: ${EASYSTOCK_CERT_FINGERPRINT:-}
+      EASYSTOCK_LOG_LEVEL: ${EASYSTOCK_LOG_LEVEL:-Information}
+      EASYSTOCK_TRUSTED_PROXIES: ${EASYSTOCK_TRUSTED_PROXIES:-}
+    volumes:
+      - easystock-data:/data
+    ports:
+      - "8080:8080"
+
+volumes:
+  pgdata:
+  easystock-data:
