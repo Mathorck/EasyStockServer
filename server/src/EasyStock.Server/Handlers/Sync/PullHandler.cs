@@ -82,7 +82,7 @@ public sealed partial class PullHandler(
 
         var rows = new Dictionary<string, List<JsonObject>>();
         var alerts = new List<SyncPullAlert>();
-        var receivesAlerts = ShouldReceiveAlerts(caller);
+        var receivesAlerts = await ReceivesAlertsAsync(caller, kept.Exists(c => c.Table == Alerts), ct);
         foreach (var c in kept)
         {
             switch (c.Table)
@@ -135,13 +135,18 @@ public sealed partial class PullHandler(
     }
 
     /// <summary>
-    /// Whether <paramref name="user"/> receives low-stock alerts (docs/03-server-spec.md, "Low-stock alerts").
-    /// TODO(alerts_enabled): also apply users.alerts_enabled (plan 1.2 #12: null = role default, admin and member
-    /// on, viewer off) once the users table exists, ideally through the shared AlertRecipients.IsRecipient(user).
-    /// Until then the permission alone decides, so Viewers receive alerts too.
+    /// Whether the caller receives low-stock alerts: one query for its <c>alerts_enabled</c>, only when the page
+    /// holds alerts. A disabled or deleted user receives none.
     /// </summary>
-    internal static bool ShouldReceiveAlerts(ICurrentUser user) =>
-        user.IsAuthenticated && !user.IsGuest && Permissions.Can(user.Role, Permission.ReceiveAlerts);
+    private async Task<bool> ReceivesAlertsAsync(ICurrentUser caller, bool pageHasAlerts, CancellationToken ct)
+    {
+        if (!pageHasAlerts || !caller.IsAuthenticated || caller.IsGuest) return false;
+        var user = await db.Users.AsNoTracking()
+            .Where(u => u.Id == caller.UserId && u.DisabledAt == null && u.DeletedAt == null)
+            .Select(u => new { u.AlertsEnabled })
+            .FirstOrDefaultAsync(ct);
+        return user is not null && AlertRecipientsHelper.IsRecipient(caller.Role, caller.IsGuest, user.AlertsEnabled);
+    }
 
     [LoggerMessage(Level = LogLevel.Debug, Message = "Pull since {Since}: {Count} rows, next {Next}, more {HasMore}")]
     private static partial void LogPulled(ILogger logger, long since, int count, long next, bool hasMore);

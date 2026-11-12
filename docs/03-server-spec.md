@@ -291,7 +291,7 @@ Pull answer:
 * If an article goes from above its threshold to at or below it, the server inserts one `low_stock_alert` and marks it low in `low_stock_state`.
 * If an article goes back above its threshold, `low_stock_state` is cleared, so it can alert again.
 * Articles with `tracking = serial`, archived or soft-deleted articles, and articles without a threshold never alert.
-* Recipients are Admins and Members by default, plus Viewers who turned alerts on, never Guests.
+* Recipients: `users.alerts_enabled` decides; null means the role default (Admin and Member on, Viewer off). Guests, disabled and deleted users never receive alerts. The rule lives in `AlertRecipientsHelper`.
 * The user who pushed the batch is not a recipient of the alerts it caused.
 * After the transaction, the server sends a "sync now" push to the recipients that registered a UnifiedPush endpoint.
 

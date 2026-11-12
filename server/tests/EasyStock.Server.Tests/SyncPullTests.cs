@@ -450,8 +450,64 @@ public sealed class SyncPullTests(PostgresFixture pg) : IAsyncLifetime
         Assert.Null(await AlertFor(await _factory.SignInAsync(Role.Guest)));
         // A full account flagged as a Guest kind (pending promotion) keeps Guest rights.
         Assert.Null(await AlertFor(await _factory.SignInAsync(Role.Member, guestKind: true)));
-        // Viewers: not asserted, they will depend on users.alerts_enabled (default off).
     }
+
+    [Fact]
+    public async Task Alerts_follow_users_alerts_enabled_over_the_role_default()
+    {
+        var f = NewFixture();
+        var author = await _factory.SignInAsync(Role.Member);
+        var alert = new LowStockAlert { Id = Guid.NewGuid(), ArticleId = f.Article.Id, CrossedAt = 1762859000000, Stock = 4000, CausedByUserId = author.UserId };
+        var since = await Cursor();
+        await Insert(f.Category, f.Location, f.Article, alert);
+
+        async Task<bool> Gets(SignedInUser user)
+        {
+            using var doc = await Pull(ClientAs(user), since, 2000);
+            return doc.RootElement.GetProperty("alerts").EnumerateArray()
+                .Any(a => a.GetProperty("id").GetString() == alert.Id.ToString());
+        }
+
+        async Task SetAlerts(SignedInUser user, string json)
+        {
+            var response = await ClientAs(user).PatchAsync("/api/v1/me",
+                new StringContent($$"""{"alertsEnabled":{{json}}}""", System.Text.Encoding.UTF8, "application/json"), Ct);
+            Assert.True(response.IsSuccessStatusCode, await response.Content.ReadAsStringAsync(Ct));
+        }
+
+        var viewer = await _factory.SignInAsync(Role.Viewer);
+        Assert.False(await Gets(viewer));
+        await SetAlerts(viewer, "true");
+        Assert.True(await Gets(viewer));
+        await SetAlerts(viewer, "null");
+        Assert.False(await Gets(viewer));
+
+        var member = await _factory.SignInAsync(Role.Member);
+        Assert.True(await Gets(member));
+        await SetAlerts(member, "false");
+        Assert.False(await Gets(member));
+        await SetAlerts(member, "null");
+        Assert.True(await Gets(member));
+
+        var admin = await _factory.SignInAsync(Role.Admin);
+        Assert.True(await Gets(admin));
+        await SetAlerts(admin, "false");
+        Assert.False(await Gets(admin));
+
+        Assert.False(await Gets(await _factory.SignInAsync(Role.Guest)));
+    }
+
+    [Theory]
+    [InlineData(Role.Admin, false, null, true)]
+    [InlineData(Role.Admin, false, false, false)]
+    [InlineData(Role.Member, false, null, true)]
+    [InlineData(Role.Member, false, false, false)]
+    [InlineData(Role.Viewer, false, null, false)]
+    [InlineData(Role.Viewer, false, true, true)]
+    [InlineData(Role.Guest, true, true, false)]
+    [InlineData(Role.Member, true, true, false)]
+    public void Recipient_rule(Role role, bool isGuest, bool? alertsEnabled, bool expected) =>
+        Assert.Equal(expected, EasyStock.Server.Helpers.AlertRecipientsHelper.IsRecipient(role, isGuest, alertsEnabled));
 
     // ---- users ----
 
