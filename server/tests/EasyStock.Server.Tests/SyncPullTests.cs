@@ -425,7 +425,7 @@ public sealed class SyncPullTests(PostgresFixture pg) : IAsyncLifetime
         var since = await Cursor();
         var before = await WithDb(db => db.StockMovements.Where(m => m.Id == movement.Id).Select(m => m.ServerSeq).SingleAsync(Ct));
 
-        // What the retention job does to an old movement
+        // An author change (for example after a user is deleted)
         await WithDb(db => db.Database.ExecuteSqlAsync(
             $"UPDATE stock_movement SET created_by = NULL, device_id = NULL WHERE id = {movement.Id}", Ct));
 

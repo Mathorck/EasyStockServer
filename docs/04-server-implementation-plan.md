@@ -15,7 +15,7 @@ The plan is built from `docs/03-server-spec.md` alone (362 lines). It has five p
 - **Packages:**
   - Runtime: `Npgsql.EntityFrameworkCore.PostgreSQL`, `EFCore.NamingConventions` (snake_case), `Microsoft.AspNetCore.Identity.EntityFrameworkCore`, `Microsoft.AspNetCore.Authentication.JwtBearer`, `Microsoft.AspNetCore.OpenApi`, `QRCoder` (MIT, ASCII QR in the log).
   - Tests: `xunit.v3`, `Microsoft.AspNetCore.Mvc.Testing`, `Testcontainers.PostgreSql`, `Respawn`, `Microsoft.Extensions.TimeProvider.Testing`.
-- **Time:** inject `TimeProvider` everywhere. Never call `DateTime.UtcNow` directly. Tests use `FakeTimeProvider` for expiries, lockout, retention and jobs.
+- **Time:** inject `TimeProvider` everywhere. Never call `DateTime.UtcNow` directly. Tests use `FakeTimeProvider` for expiries, lockout and jobs.
 
 ---
 
@@ -73,7 +73,7 @@ The plan is built from `docs/03-server-spec.md` alone (362 lines). It has five p
    - **Decision:** the partition key is the `sid` claim when authenticated, otherwise the client IP.
    - `refresh`, `server-info`, `logout` and image GETs without a token fall under 120/min per IP.
 8. **Advisory lock scope and pull consistency.** The spec only mentions push.
-   - **Decision:** every writer of a `server_seq` column takes the same transaction-scoped advisory lock: push, retention job, backup import, user rename or delete, alert insert.
+   - **Decision:** every writer of a `server_seq` column takes the same transaction-scoped advisory lock: push, backup import, user rename or delete, alert insert.
    - Pull runs in one `REPEATABLE READ` read-only transaction. See 3.1.
 9. **`low_stock_alert` per-user delivery tracking.** There is no delivery table.
    - **Decision:** none needed. Alerts carry `server_seq` from the global sequence.
@@ -129,7 +129,7 @@ The plan is built from `docs/03-server-spec.md` alone (362 lines). It has five p
     - Confirmed against the Kotlin `Permissions`: EDITOR = READ + WRITE.
 24. **Version-header exemptions:** `/health`, `/openapi/*`, `GET /api/v1/server-info`, and `GET/HEAD /api/v1/images/*` (image loaders often can't add custom headers; confirm).
     - A missing or unparsable header gets 426 `app-too-old` (an app without headers is by definition too old).
-25. **Retention clock.** **Decision:** based on the movement's `created_at` (app epoch ms).
+25. **Retention clock.** Dropped: movements always keep their author, there is no retention.
 26. **Problem `type` format.** **Decision:** the bare slug (`"type": "session-revoked"`). That is a valid relative URI reference per RFC 9457 and matches the spec examples. Never change a slug once shipped.
 27. **Guest or Viewer calling `/sync/push`.** **Decision:** 403 `not-allowed` for the whole request, no per-row results.
 28. **Lockout and disabled responses.**
@@ -356,7 +356,7 @@ The build order deviates from the suggested one, on purpose. Everything not bloc
 - Last-admin guard: in a transaction with `pg_advisory_xact_lock(ADMIN_KEY)`, count active admins (role admin, not disabled, not deleted) excluding the target. Zero gives 409 `last-admin`. It applies to demote, disable and delete, including self-actions.
 - A full account cannot become a Guest: 409 `role-not-allowed`. Setting a role on a Guest through `PATCH` also gives 409 `use-promotion`.
 - Disabling revokes all sessions. Role changes take effect at once on the server and queue a `sync` push so the app refreshes.
-- Settings schema: `server_name` (string ≤ 50) and `movement_author_retention_days` (int ≥ 1, or null = keep). Unknown keys give 400 `validation-failed`.
+- Settings schema: `server_name` (string ≤ 50). Old rows with other keys are ignored. Unknown keys give 400 `validation-failed`.
 
 **Tests:**
 - The role matrix: an xUnit `[Theory]` over (role × endpoint) asserts 2xx or 403 `not-allowed` per `Permissions`. The push part of the matrix is added in Phase 8.
@@ -507,17 +507,13 @@ The build order deviates from the suggested one, on purpose. Everything not bloc
 2. Expire promotions (`ended_at`, `end_reason='expired'`). Purge invites and resets that expired more than 30 days ago.
 3. Delete sessions with `last_used_at` more than 90 days ago (and their push registrations).
 4. Delete `sync_batch` rows older than 7 days.
-5. Retention:
-   - If `movement_author_retention_days` is set, `UPDATE stock_movement SET created_by=NULL, device_id=NULL WHERE created_at < @cutoff AND (created_by IS NOT NULL OR device_id IS NOT NULL)` in chunks of 1000 rows.
-   - Each chunk is its own transaction holding the sync lock, so pushes are never blocked long.
-   - The trigger bumps `server_seq`.
-6. Images: mark and clear `unreferenced_since`, then delete files and rows past 30 days (file first, then row; a missing file is ignored).
+5. Images: mark and clear `unreferenced_since`, then delete files and rows past 30 days (file first, then row; a missing file is ignored).
 
 Expose `CleanupService.RunOnceAsync()` for tests.
 
-**Tests:** each task with `FakeTimeProvider`; retention removes authors after the set time and bumps seq, and a Member pull then receives the anonymised rows.
+**Tests:** each task with `FakeTimeProvider`.
 
-**Done when:** the retention test from the spec and the per-task tests are green.
+**Done when:** the per-task tests are green.
 
 ### Phase 11: Backup export and import (M–L, BLOCKED on the app backup format)
 
@@ -586,7 +582,7 @@ Expose `CleanupService.RunOnceAsync()` for tests.
 - `EASYSTOCK_TRUSTED_PROXIES` with a Compose example.
 - Backups of `pgdata` and `/data` (signing key, photos).
 - Upgrading.
-- nFADP/GDPR: the self-hoster is the data controller; what is stored; the retention setting; no IPs in the DB; the log policy and its setup-token exception.
+- nFADP/GDPR: the self-hoster is the data controller; what is stored; no IPs in the DB; the log policy and its setup-token exception.
 - Hardware notes for the Pi 4.
 
 Also update `docs/03-server-spec.md` with the decisions from 1.2 so the spec stays true.
@@ -599,7 +595,7 @@ Also update `docs/03-server-spec.md` with the decisions from 1.2 so the spec sta
 
 - **The sequence and the trigger.** One `CREATE SEQUENCE server_seq` serves all shared tables plus `low_stock_alert` plus `users`. A `BEFORE INSERT OR UPDATE` trigger sets `NEW.server_seq := nextval('server_seq')` and calls `pg_advisory_xact_lock(SYNC_KEY)`. With the trigger, no writer can forget to bump the seq or to take the lock. Re-acquiring the lock in the same transaction is free.
   - The `users` trigger fires only `WHEN (OLD.display_name IS DISTINCT FROM NEW.display_name OR OLD.deleted_at IS DISTINCT FROM NEW.deleted_at)`, so `last_seen` writes don't churn pulls.
-- **The explicit lock.** The push processor (and import and retention) still take the lock explicitly at transaction start, because conflict pre-checks must read under the lock, not only the writes.
+- **The explicit lock.** The push processor (and import) still take the lock explicitly at transaction start, because conflict pre-checks must read under the lock, not only the writes.
 - **Why this is enough.**
   - Writers are serialised, so every seq handed out by transaction T1 is lower than T2's, and T1 commits before T2 starts allocating.
   - A pull snapshot therefore sees a prefix of the seq space, plus nothing above it.
@@ -743,7 +739,7 @@ Per-row push reasons are a separate, smaller set inside `results[].reason`: `not
 7. **Replace import leaving stale data on phones.** Mitigation: the dataset epoch, which needs app work. Agree it before Phase 11.
 8. **Rate-limit misconfiguration behind Docker or a proxy** (everyone shares one IP bucket, so 10 logins per minute server-wide). Mitigation: `EASYSTOCK_TRUSTED_PROXIES`, README examples, and a startup warning when requests arrive with `X-Forwarded-For` from an untrusted private address.
 9. **Personal data in logs** through EF or Npgsql exception messages. Mitigation: exception mapping, sensitive-data logging off, and a log-capture test asserting that no display name or token appears.
-10. **Pi resource limits** (startup time, memory). Mitigation: workstation GC, ReadyToRun, no in-memory caches of row data, chunked retention, streamed export and import.
+10. **Pi resource limits** (startup time, memory). Mitigation: workstation GC, ReadyToRun, no in-memory caches of row data, streamed export and import.
 11. **SSRF through push endpoints.** Mitigation: the restrictions in 1.2 #31, documented.
 12. **Last-admin and Guest-limit races.** Mitigation: dedicated advisory locks, covered by concurrent tests.
 

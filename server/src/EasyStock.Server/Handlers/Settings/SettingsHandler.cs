@@ -6,32 +6,28 @@ using Microsoft.EntityFrameworkCore;
 
 namespace EasyStock.Server.Handlers.Settings;
 
-/// <summary>Reads and writes the typed server settings in the `setting` table. A missing row means the default.</summary>
+/// <summary>Reads and writes the typed server settings in the `setting` table. A missing row means the default. Rows with other keys are ignored.</summary>
 public sealed class SettingsHandler(EasyStockDbContext db)
 {
     private const string ServerNameKey = "server_name";
-    private const string RetentionKey = "movement_author_retention_days";
 
     public async Task<ServerSettings> GetAsync(CancellationToken ct = default)
     {
         var rows = await db.Set<Setting>().AsNoTracking()
-            .Where(s => s.Key == ServerNameKey || s.Key == RetentionKey)
+            .Where(s => s.Key == ServerNameKey)
             .ToDictionaryAsync(s => s.Key, s => s.Value, ct);
 
-        return new ServerSettings(
-            Read<string>(rows, ServerNameKey) ?? ServerSettings.DefaultServerName,
-            Read<int?>(rows, RetentionKey));
+        return new ServerSettings(Read<string>(rows, ServerNameKey) ?? ServerSettings.DefaultServerName);
     }
 
-    /// <summary>Replaces both values. The caller validates first.</summary>
+    /// <summary>Replaces the settings. The caller validates first.</summary>
     public async Task SaveAsync(ServerSettings settings, CancellationToken ct = default)
     {
         var existing = await db.Set<Setting>()
-            .Where(s => s.Key == ServerNameKey || s.Key == RetentionKey)
+            .Where(s => s.Key == ServerNameKey)
             .ToListAsync(ct);
 
         Upsert(existing, ServerNameKey, JsonSerializer.Serialize(settings.ServerName));
-        Upsert(existing, RetentionKey, JsonSerializer.Serialize(settings.MovementAuthorRetentionDays));
         await db.SaveChangesAsync(ct);
     }
 

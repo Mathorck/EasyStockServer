@@ -21,7 +21,7 @@ public sealed class AdminSettingsController(SettingsHandler store) : ControllerB
     public async Task<IActionResult> Put([FromBody] ServerSettings? settings, CancellationToken ct)
     {
         if (settings is null)
-            return InvalidSettings("The request body must be a JSON object with serverName and movementAuthorRetentionDays.");
+            return InvalidSettings("The request body must be a JSON object with serverName.");
         if (!ModelState.IsValid)
             return InvalidSettings(FirstModelError() ?? "The request body is not valid.");
         if (settings.Validate() is { } error)

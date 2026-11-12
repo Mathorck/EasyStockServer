@@ -12,11 +12,11 @@ public static class ServerSeq
     public const string Sequence = "server_seq";
     public const string TriggerFunction = "set_server_seq";
 
-    /// <summary>Key of the transaction-level advisory lock shared by the trigger, push, import and retention.</summary>
+    /// <summary>Key of the transaction-level advisory lock shared by the trigger, push and import.</summary>
     public const long SyncLockKey = 0x4553_5359_4E43; // "ESSYNC"
 
     /// <summary>
-    /// Takes the sync lock for the current transaction. Push, import and retention call it first, so their
+    /// Takes the sync lock for the current transaction. Push and import call it first, so their
     /// conflict checks read under the lock too. Taking it again in the same transaction is free.
     /// </summary>
     public static Task AcquireSyncLockAsync(this EasyStockDbContext db, CancellationToken ct)

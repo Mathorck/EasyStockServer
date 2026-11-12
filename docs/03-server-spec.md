@@ -47,7 +47,7 @@ What the optional EasyStock server is, how it is built, and how it behaves. The 
 * `EASYSTOCK_DATA_DIR`: folder for photos, the signing key and data-protection keys (default `/data`).
 * `EASYSTOCK_CERT_FINGERPRINT`: SHA-256 of a self-signed certificate, written into QR codes (optional).
 * `EASYSTOCK_LOG_LEVEL`: log level (default `Information`).
-* Everything else (Guest limit, retention, alert recipients) is set by an Admin in the app and stored in the database.
+* Everything else (the server name) is set by an Admin in the app and stored in the database.
 
 ## Shared tables
 
@@ -342,9 +342,6 @@ Pull answer:
 * It marks invites, reset tokens and promotions as expired.
 * It deletes sessions not used for 90 days.
 * It deletes `sync_batch` rows older than 7 days.
-* It applies the retention setting: after the chosen number of days, `created_by` and `device_id` of old movements are set to null and the row gets a new `server_seq`.
-* This is the only change ever made to a movement row, and it only removes personal data.
-* Every phone gets the change by its normal pull (the new `server_seq`), and updates only `created_by` and `device_id` of the movement it already has.
 * It deletes photos no article references any more, 30 days after their last use.
 
 ## Personal data (nFADP / GDPR)
@@ -352,7 +349,7 @@ Pull answer:
 * Stored per user: username, display name, role, last seen, device names, and who made each movement.
 * No email, no phone number, no IP address stored in the database.
 * Logs never contain passwords, tokens, display names or row content; they contain user IDs only.
-* The retention of who made each movement is set by the Admin (default: keep).
+* A movement always keeps who made it. There is no retention setting.
 * Deleting a user keeps their movements (stock needs them) but drops the link to a name.
 * The README explains to self-hosters that they are the data controller for their server.
 
@@ -387,7 +384,6 @@ Pull answer:
 * Guest filter: a Guest pull never contains an author, a device, a comment or a review; stock computed from it matches a Member's.
 * End-to-end: the app's own client and sync code (Room on the host JVM) runs against the Docker image with PostgreSQL. `server/e2e/run.sh` starts a throwaway server, runs the app's E2E tests and stops it; see [05-e2e-tests.md](05-e2e-tests.md). No server option is needed for it.
 * Alerts: exactly at the threshold, just under, just above, under and back within one batch, serial articles ignored, the author is not notified.
-* Retention job: removes authors after the set time and bumps `server_seq`.
 
 ## CI and releases
 

@@ -41,27 +41,46 @@ public sealed class AdminSettingsTests(PostgresFixture pg) : IAsyncLifetime
         Assert.Equal(HttpStatusCode.OK, response.StatusCode);
         using var doc = JsonDocument.Parse(await response.Content.ReadAsStringAsync(ct));
         Assert.Equal("EasyStock", doc.RootElement.GetProperty("serverName").GetString());
-        Assert.Equal(JsonValueKind.Null, doc.RootElement.GetProperty("movementAuthorRetentionDays").ValueKind);
     }
 
     [Fact]
-    public async Task Put_then_get_returns_the_saved_values()
+    public async Task Put_then_get_returns_the_saved_value()
     {
         var ct = TestContext.Current.CancellationToken;
         var client = await Client(Role.Admin);
 
-        var put = await client.PutAsJsonAsync(Url, new { serverName = "Maison Dupont", movementAuthorRetentionDays = 90 }, ct);
+        var put = await client.PutAsJsonAsync(Url, new { serverName = "Maison Dupont" }, ct);
         Assert.Equal(HttpStatusCode.OK, put.StatusCode);
 
         var get = await client.GetFromJsonAsync<JsonElement>(Url, ct);
         Assert.Equal("Maison Dupont", get.GetProperty("serverName").GetString());
-        Assert.Equal(90, get.GetProperty("movementAuthorRetentionDays").GetInt32());
+    }
 
-        // null means keep everything, so a second PUT can clear the retention again.
-        var clear = await client.PutAsJsonAsync(Url, new { serverName = "Maison Dupont", movementAuthorRetentionDays = (int?)null }, ct);
-        Assert.Equal(HttpStatusCode.OK, clear.StatusCode);
-        get = await client.GetFromJsonAsync<JsonElement>(Url, ct);
-        Assert.Equal(JsonValueKind.Null, get.GetProperty("movementAuthorRetentionDays").ValueKind);
+    [Fact]
+    public async Task Old_retention_row_is_ignored()
+    {
+        var ct = TestContext.Current.CancellationToken;
+        using (var scope = _factory.Services.CreateScope())
+        {
+            var db = scope.ServiceProvider.GetRequiredService<EasyStockDbContext>();
+            db.Set<Setting>().Add(new Setting { Key = "movement_author_retention_days", Value = "90" });
+            await db.SaveChangesAsync(ct);
+        }
+
+        try
+        {
+            var client = await Client(Role.Admin);
+            var get = await client.GetFromJsonAsync<JsonElement>(Url, ct);
+            Assert.False(get.TryGetProperty("movementAuthorRetentionDays", out _));
+            var put = await client.PutAsJsonAsync(Url, new { serverName = "Maison" }, ct);
+            Assert.Equal(HttpStatusCode.OK, put.StatusCode);
+        }
+        finally
+        {
+            using var scope = _factory.Services.CreateScope();
+            var db = scope.ServiceProvider.GetRequiredService<EasyStockDbContext>();
+            await db.Set<Setting>().Where(s => s.Key == "movement_author_retention_days").ExecuteDeleteAsync(CancellationToken.None);
+        }
     }
 
     [Fact]
@@ -70,7 +89,7 @@ public sealed class AdminSettingsTests(PostgresFixture pg) : IAsyncLifetime
         var ct = TestContext.Current.CancellationToken;
         var name = new string('x', 50);
 
-        var put = await (await Client(Role.Admin)).PutAsJsonAsync(Url, new { serverName = name, movementAuthorRetentionDays = (int?)null }, ct);
+        var put = await (await Client(Role.Admin)).PutAsJsonAsync(Url, new { serverName = name }, ct);
 
         Assert.Equal(HttpStatusCode.OK, put.StatusCode);
     }
@@ -81,7 +100,7 @@ public sealed class AdminSettingsTests(PostgresFixture pg) : IAsyncLifetime
         var ct = TestContext.Current.CancellationToken;
         var name = new string('x', 51);
 
-        var put = await (await Client(Role.Admin)).PutAsJsonAsync(Url, new { serverName = name, movementAuthorRetentionDays = (int?)null }, ct);
+        var put = await (await Client(Role.Admin)).PutAsJsonAsync(Url, new { serverName = name }, ct);
 
         await AssertProblemAsync(put, HttpStatusCode.BadRequest, "validation-failed");
         Assert.Equal("EasyStock", await StoredServerNameAsync(ct));
@@ -94,19 +113,7 @@ public sealed class AdminSettingsTests(PostgresFixture pg) : IAsyncLifetime
     {
         var ct = TestContext.Current.CancellationToken;
 
-        var put = await (await Client(Role.Admin)).PutAsJsonAsync(Url, new { serverName = name, movementAuthorRetentionDays = (int?)null }, ct);
-
-        await AssertProblemAsync(put, HttpStatusCode.BadRequest, "validation-failed");
-    }
-
-    [Theory]
-    [InlineData(0)]
-    [InlineData(-5)]
-    public async Task Retention_below_one_day_is_rejected(int days)
-    {
-        var ct = TestContext.Current.CancellationToken;
-
-        var put = await (await Client(Role.Admin)).PutAsJsonAsync(Url, new { serverName = "EasyStock", movementAuthorRetentionDays = days }, ct);
+        var put = await (await Client(Role.Admin)).PutAsJsonAsync(Url, new { serverName = name }, ct);
 
         await AssertProblemAsync(put, HttpStatusCode.BadRequest, "validation-failed");
     }
@@ -115,7 +122,7 @@ public sealed class AdminSettingsTests(PostgresFixture pg) : IAsyncLifetime
     public async Task Unknown_key_is_rejected_with_validation_failed()
     {
         var ct = TestContext.Current.CancellationToken;
-        var body = """{"serverName":"EasyStock","movementAuthorRetentionDays":null,"theme":"dark"}""";
+        var body = """{"serverName":"EasyStock","theme":"dark"}""";
 
         var put = await (await Client(Role.Admin)).PutAsync(Url, new StringContent(body, Encoding.UTF8, "application/json"), ct);
 
@@ -126,7 +133,7 @@ public sealed class AdminSettingsTests(PostgresFixture pg) : IAsyncLifetime
     public async Task Wrong_type_is_rejected_with_validation_failed()
     {
         var ct = TestContext.Current.CancellationToken;
-        var body = """{"serverName":"EasyStock","movementAuthorRetentionDays":"ninety"}""";
+        var body = """{"serverName":123}""";
 
         var put = await (await Client(Role.Admin)).PutAsync(Url, new StringContent(body, Encoding.UTF8, "application/json"), ct);
 
@@ -142,7 +149,7 @@ public sealed class AdminSettingsTests(PostgresFixture pg) : IAsyncLifetime
         var get = await client.GetAsync(Url, ct);
         await AssertProblemAsync(get, HttpStatusCode.Forbidden, "not-allowed");
 
-        var put = await client.PutAsJsonAsync(Url, new { serverName = "Hacked", movementAuthorRetentionDays = 1 }, ct);
+        var put = await client.PutAsJsonAsync(Url, new { serverName = "Hacked" }, ct);
         await AssertProblemAsync(put, HttpStatusCode.Forbidden, "not-allowed");
         Assert.Equal("EasyStock", await StoredServerNameAsync(ct));
     }
@@ -154,7 +161,7 @@ public sealed class AdminSettingsTests(PostgresFixture pg) : IAsyncLifetime
         using var scope = _factory.Services.CreateScope();
         var db = scope.ServiceProvider.GetRequiredService<EasyStockDbContext>();
         // Only the Admin settings: the dataset_epoch row is shared with every host on this database.
-        await db.Set<Setting>().Where(s => s.Key == "server_name" || s.Key == "movement_author_retention_days")
+        await db.Set<Setting>().Where(s => s.Key == "server_name")
             .ExecuteDeleteAsync(TestContext.Current.CancellationToken);
     }
 
