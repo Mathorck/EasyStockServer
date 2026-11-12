@@ -14,11 +14,11 @@
 
 ---
 
-## ⚠️ Under development: not usable yet
+## ⚠️ Not released yet
 
-- **The server is being built.** Only the skeleton exists: configuration, `/health`, `/openapi/v1.json`, `GET /api/v1/server-info` (placeholder values) and the app-version check. There is no login, no sync and no image published yet.
-- Everything marked **(planned)** below describes the intended behavior, not what runs today.
-- Do not host real data on it. The data format and API may change without notice.
+- **The server is feature-complete for the app's server mode**: login, roles, sync, photos, backups, alerts and admin. It is tested against a real PostgreSQL, and end-to-end against the app's own sync code.
+- **No release and no published Docker image yet.** Build the image yourself (see [Quick start](#quick-start)).
+- Do not host important data on it yet. The data format and API may still change before the first release.
 
 ---
 
@@ -30,11 +30,13 @@ This server is an **optional** add-on. It lets several phones share one stock, w
 
 ---
 
-## Features (planned)
+## Features
 
 - **Shared stock**: several phones sync one catalogue, locations and stock.
-- **Roles**: `admin`, `member`, `viewer` and `guest`, with rights checked on every request.
-- **Movement history**: stock movements are append-only, with the author.
+- **Roles**: `admin`, `member`, `viewer` and `guest`, with the same rights as the app, checked on every request.
+- **Movement history**: stock movements are append-only and always keep who made them, so you know who took the axe.
+- **First change wins**: when two phones edit the same thing, the first change is kept and the second phone is told, with a choice to keep theirs or re-apply its own.
+- **Accounts**: users change their password and display name; Admins rename, disable and manage users and their devices.
 - **Low-stock alerts**: sent to phones through [UnifiedPush](https://unifiedpush.org), no Google services needed.
 - **Invites and Guest QR code**: add users with a single-use invite, or let people join as Guests with a printed QR code.
 - **Photos and backups**: photos stored on the server, backup export and import by an Admin.
@@ -50,7 +52,7 @@ This server is an **optional** add-on. It lets several phones share one stock, w
 
 ---
 
-## Quick start (planned)
+## Quick start
 
 The Compose file exists in [`server/docker-compose.yml`](server/docker-compose.yml), but no image is published yet. Until a release exists, build it yourself with `docker compose up -d --build` in `server/`.
 
@@ -93,7 +95,7 @@ docker compose up -d
 
 ## Configuration
 
-All settings come from environment variables, with safe defaults. Everything else (Guest limit, retention, alert recipients) is set by an Admin in the app and stored in the database.
+All settings come from environment variables, with safe defaults. Everything else is set in the app and stored in the database: the server name and Guest signup (with its limit) by an Admin, low-stock alerts by each user (on by default for Admins and Members).
 
 | Variable | Required | Default | Content |
 |---|---|---|---|
@@ -112,7 +114,7 @@ Logging uses Serilog and writes to the console. Levels can also be set in the `S
 
 ---
 
-## First start (planned)
+## First start
 
 On the first start with no user, the server prints a **setup token** and a `setup` QR code drawn in text in its log (`docker compose logs server`). Scan it with the app to create the first Admin.
 
@@ -151,7 +153,7 @@ Your data lives in two places. **Back up both**:
 - the PostgreSQL volume (`pgdata`), for example with `pg_dump`;
 - the `/data` volume (`easystock-data`): photos, the token signing key and data-protection keys.
 
-An Admin can also export a backup file with photos from the app (planned).
+An Admin can also export a backup file with photos from the app, and import one (merge, or replace everything: the phones then drop their unsent changes and download the new data).
 
 ---
 
@@ -161,15 +163,15 @@ Built to store as little personal data as possible, in line with the Swiss nFADP
 
 - **Stored**: username, display name, role, last seen, device names, and who made each stock movement.
 - **Not stored**: no email address, no phone number, no IP address in the database.
-- **Logs** never contain passwords, tokens, display names or row content, only user IDs (the setup token is the single exception, see [First start](#first-start-planned)).
-- **Retention**: an Admin can set how long the author of a movement is kept (default: keep). Deleting a user keeps their movements, but drops the link to a name.
+- **Logs** never contain passwords, tokens, display names or row content, only user IDs (the setup token is the single exception, see [First start](#first-start)).
+- **Movement authors are kept**: the history always shows who made each movement. Disabling or deleting a user never removes their movements.
 - **You are the data controller.** Whoever hosts a server is responsible for the data on it: informing users, handling their requests, securing the host and the backups.
 
 ---
 
 ## Development
 
-Requirements: the .NET 10 SDK and Docker (the tests start PostgreSQL with Testcontainers).
+Requirements: the .NET 10 SDK and Docker (the tests start PostgreSQL with Testcontainers). Some tests check the server against the app's schema and permissions, so they need the app repository: clone [Mathorck/EasyStock](https://github.com/Mathorck/EasyStock) next to this one as `../EasyStock`, or set `EASYSTOCK_APP_DIR`.
 
 ```
 cd server
@@ -179,14 +181,26 @@ dotnet test
 
 | Path | Content |
 |---|---|
-| `server/src/EasyStock.Server` | The web API (minimal APIs, EF Core, Npgsql) |
+| `server/src/EasyStock.Server` | The web API (ASP.NET Core MVC controllers, EF Core, Npgsql) |
 | `server/tests/EasyStock.Server.Tests` | xUnit tests against a real PostgreSQL |
 | `server/Dockerfile`, `server/docker-compose.yml` | Hosting |
-| `docs/` | [Specification](docs/03-server-spec.md) and [implementation plan](docs/04-server-implementation-plan.md) |
+| `server/e2e/` | Scripts that start a throwaway server for the end-to-end tests |
+| `server/openapi/` | The generated OpenAPI document |
+| `docs/` | [Specification](docs/03-server-spec.md), [implementation plan](docs/04-server-implementation-plan.md) and [end-to-end tests](docs/05-e2e-tests.md) |
 
-CI (`.github/workflows/ci.yml`) builds and tests `server/` on every push to `main` and every pull request.
+CI (`.github/workflows/ci.yml`) builds and tests `server/` on every push to `main` and every pull request, then runs the end-to-end tests against the app's `main`.
 
-Branch from `main`, open a pull request. Commits follow [Conventional Commits](https://www.conventionalcommits.org), like the app. Code, comments and commit messages in English.
+Branch from `main`, open a pull request. Commits follow [Conventional Commits](https://www.conventionalcommits.org), like the app (see [`.claude/rules/commits.md`](.claude/rules/commits.md)): 72 characters max, no AI attribution footers. Code, comments and commit messages in English.
+
+### End-to-end tests
+
+The app's real sync code runs against a fresh server and PostgreSQL in Docker: setup, login, invites, roles, two-phone sync, first change wins, dataset reset, admin, photos, backups and accounts. It needs Docker Compose v2, Python 3, JDK 21 and the Android SDK (`ANDROID_HOME`), no emulator.
+
+```
+server/e2e/run.sh [app-dir]   # default: ../EasyStock
+```
+
+See [docs/05-e2e-tests.md](docs/05-e2e-tests.md) for running them by hand.
 
 ---
 
