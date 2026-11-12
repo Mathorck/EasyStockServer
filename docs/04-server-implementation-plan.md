@@ -146,15 +146,15 @@ The plan is built from `docs/03-server-spec.md` alone (362 lines). It has five p
 ### 1.3 Placeholder shared tables (until the dbml arrives)
 
 Every table has `id uuid pk`, `updated_at bigint` (epoch ms), `deleted_at bigint null` (where soft-deletable) and `server_seq bigint not null`.
-- `category` (name unique where `deleted_at is null`)
+- `category` (name unique)
 - `attribute_definition` (key unique, immutable; type; options jsonb)
 - `category_attribute` (category_id, attribute_definition_id, unique pair)
-- `location` (name, parent_id self-FK, barcode unique filtered)
+- `location` (name, parent_id self-FK, barcode unique)
 - `article`:
-  - name, sku (unique filtered), barcode (unique filtered), category_id
+  - name, sku (unique), barcode (unique), category_id
   - tracking (`quantity|serial`), low_stock_threshold bigint null, archived_at null, `image_sha256 char(64) null` (no FK)
   - attributes jsonb
-- `item` (article_id, location_id, serial_number unique filtered, barcode?)
+- `item` (article_id, location_id, serial_number unique, barcode?)
 - `stock_movement`:
   - article_id, location_id, item_id null, quantity bigint, reason, comment null
   - occurred_at, created_at
@@ -391,7 +391,7 @@ The build order deviates from the suggested one, on purpose. Everything not bloc
 **Decisions**
 - Column names follow the dbml through snake_case naming. `article.image_path` becomes `image_sha256`.
 - `stock_movement` gets `created_by`, `device_id`.
-- Unique indexes are filtered with `HasFilter("deleted_at IS NULL")` where the app clears the value on soft delete.
+- Unique indexes are not filtered: the app's schema has no filter, and a value the app clears on soft delete is NULL, which PostgreSQL never counts as a duplicate.
 - Partial unique index for the open `stock_review` per location.
 - Indexes on `server_seq` for every table; `stock_movement(article_id)` for `SUM`.
 - FKs between shared tables are real but not cascading. The cross-table NFC-tag uniqueness (article vs location) is enforced in code under the sync lock.

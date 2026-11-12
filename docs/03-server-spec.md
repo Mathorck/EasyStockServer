@@ -57,7 +57,7 @@ What the optional EasyStock server is, how it is built, and how it behaves. The 
 * `server_seq` is set on every insert and every update, by the push processor.
 * `stock_movement` gets `created_by` (user ID) and `device_id`, set by the server from the access token, never from the phone.
 * `article.image_path` is replaced on the server by `image_sha256`, since the server stores photos by hash.
-* Unique indexes match the app (`sku`, `barcode`, category name, attribute key, serial number), filtered on `deleted_at is null` where the app clears the value on soft delete.
+* Unique indexes match the app (`sku`, `barcode`, category name, attribute key, serial number) and are not filtered: the app's schema has no filter, and a value the app clears on soft delete is NULL, which PostgreSQL never counts as a duplicate.
 
 ## Server-only tables
 
