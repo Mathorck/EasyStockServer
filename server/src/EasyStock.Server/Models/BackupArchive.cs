@@ -138,7 +138,7 @@ public sealed class BackupArchive : IDisposable
         if (m.Format != BackupFormatHelper.Format) throw new BackupException(BackupError.NotABackup, "Unknown format");
         if (m.FormatVersion < 1 || m.SchemaVersion < 1) throw new BackupException(BackupError.Damaged, "Invalid version");
         if (m.FormatVersion > BackupFormatHelper.FormatVersion) throw new BackupException(BackupError.NewerVersion, "Newer format");
-        if (m.SchemaVersion > BackupFormatHelper.SchemaVersion) throw new BackupException(BackupError.NewerVersion, "Newer schema");
+        if (m.SchemaVersion > BackupFormatHelper.MaxImportSchemaVersion) throw new BackupException(BackupError.NewerVersion, "Newer schema");
         return m;
     }
 

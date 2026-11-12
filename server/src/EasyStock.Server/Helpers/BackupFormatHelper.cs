@@ -17,8 +17,14 @@ public static class BackupFormatHelper
     public const string Format = "easystock-backup";
     public const int FormatVersion = 1;
 
-    /// <summary>Schema version of the app's database whose columns the tables hold (DB_VERSION in the app).</summary>
-    public const int SchemaVersion = 10;
+    /// <summary>
+    /// Schema version written in exported backups: the lowest supported one, so every supported app can read them
+    /// (an app refuses a backup newer than its own DB_VERSION). The data shape is the same for all supported versions.
+    /// </summary>
+    public static int ExportSchemaVersion => CompatHelper.SupportedSchemaVersions.Min();
+
+    /// <summary>Highest schema version accepted when importing a backup: the newest supported app's.</summary>
+    public static int MaxImportSchemaVersion => CompatHelper.SupportedSchemaVersions.Max();
 
     public const string FileExtension = "easystock";
     public const string ManifestEntry = "manifest.json";

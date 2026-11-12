@@ -260,6 +260,7 @@ public sealed class AdminBackupTests(PostgresFixture pg) : IAsyncLifetime
         using var manifest = JsonDocument.Parse(files["manifest.json"]);
         Assert.Equal("easystock-backup", manifest.RootElement.GetProperty("format").GetString());
         Assert.Equal(1, manifest.RootElement.GetProperty("format_version").GetInt32());
+        Assert.Equal(10, manifest.RootElement.GetProperty("schema_version").GetInt32());
         Assert.Equal(1, manifest.RootElement.GetProperty("counts").GetProperty("category").GetInt32());
         Assert.Equal(2, manifest.RootElement.GetProperty("counts").GetProperty("stock_movement").GetInt32());
         Assert.Equal(1, manifest.RootElement.GetProperty("counts").GetProperty("images").GetInt32());
@@ -514,9 +515,16 @@ public sealed class AdminBackupTests(PostgresFixture pg) : IAsyncLifetime
         await Expect(Zip([("something.txt", [1, 2, 3])]), HttpStatusCode.UnprocessableEntity, "not-a-backup");
         await Expect(Backup(format: "other"), HttpStatusCode.UnprocessableEntity, "not-a-backup");
         await Expect(Backup(formatVersion: 2), HttpStatusCode.UnprocessableEntity, "backup-newer-version");
-        await Expect(Backup(schemaVersion: 11), HttpStatusCode.UnprocessableEntity, "backup-newer-version");
+        await Expect(Backup(schemaVersion: 12), HttpStatusCode.UnprocessableEntity, "backup-newer-version");
         await Expect(Backup(extra: ("tables/category.json", "{ not json"u8.ToArray())), HttpStatusCode.UnprocessableEntity, "backup-invalid");
         await Expect(Backup(extra: ("tables/category.json", "{\"a\":1}"u8.ToArray())), HttpStatusCode.UnprocessableEntity, "backup-invalid");
+    }
+
+    [Fact]
+    public async Task Backup_with_the_newest_supported_schema_version_is_accepted()
+    {
+        var r = await Post(await SharedAsync(), Backup(schemaVersion: 11));
+        Assert.Equal(HttpStatusCode.OK, r.StatusCode);
     }
 
     [Fact]

@@ -136,7 +136,8 @@ What the optional EasyStock server is, how it is built, and how it behaves. The 
 * Times are ISO 8601 in UTC in the auth and admin endpoints; synced rows keep the app's epoch milliseconds.
 * Errors are RFC 9457 Problem Details with a stable `type` (for example `session-revoked`, `app-too-old`, `invite-expired`, `not-allowed`).
 * Requests must carry `X-EasyStock-App-Version` and `X-EasyStock-Schema-Version`.
-* The schema version is the app's Room DB version. The server accepts the version whose shared tables it matches (`docs/schema.dbml` in the app repo): currently 10. A drift test checks it against the app's `DB_VERSION`.
+* The schema version is the app's Room DB version. The server accepts the versions whose shared tables it matches (`docs/schema.dbml` in the app repo): currently 10 and 11 (11 only adds an app-only table). A drift test checks that the app's `DB_VERSION` is among them.
+* Backups: an import accepts `schema_version` up to the highest supported version (11) and refuses a newer one as `backup-newer-version`. An export writes the lowest supported version (10), so every supported app can read it.
 * An app below the minimum version, or with an unsupported schema version, gets 426 with type `app-too-old`.
 * The OpenAPI description is served at `/openapi/v1.json`.
 * `GET /health` answers 200 when the database is reachable, for Docker health checks.

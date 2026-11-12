@@ -30,7 +30,7 @@ public sealed class ApiTests(PostgresFixture pg) : IDisposable
                      "supportedSchemaVersions", "setupDone", "hasData", "guestSignupEnabled" })
             Assert.True(root.TryGetProperty(name, out _), $"missing {name}");
         Assert.Equal("0.0.0", root.GetProperty("minAppVersion").GetString());
-        Assert.Equal(10, root.GetProperty("supportedSchemaVersions")[0].GetInt32());
+        Assert.Equal([10, 11], root.GetProperty("supportedSchemaVersions").EnumerateArray().Select(e => e.GetInt32()));
     }
 
     [Fact]
@@ -51,6 +51,19 @@ public sealed class ApiTests(PostgresFixture pg) : IDisposable
         client.DefaultRequestHeaders.Add("X-EasyStock-Schema-Version", "99");
         var response = await client.GetAsync("/api/v1/anything", TestContext.Current.CancellationToken);
         Assert.Equal((HttpStatusCode)426, response.StatusCode);
+    }
+
+    [Theory]
+    [InlineData("10", HttpStatusCode.NotFound)]
+    [InlineData("11", HttpStatusCode.NotFound)]
+    [InlineData("12", (HttpStatusCode)426)]
+    public async Task Schema_versions_10_and_11_are_accepted_and_12_is_refused(string schema, HttpStatusCode expected)
+    {
+        var client = _factory.CreateClient();
+        client.DefaultRequestHeaders.Add("X-EasyStock-App-Version", "1.0.0");
+        client.DefaultRequestHeaders.Add("X-EasyStock-Schema-Version", schema);
+        var response = await client.GetAsync("/api/v1/anything", TestContext.Current.CancellationToken);
+        Assert.Equal(expected, response.StatusCode);
     }
 
     [Fact]
