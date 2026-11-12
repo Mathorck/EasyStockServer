@@ -31,6 +31,15 @@ public sealed partial class SchemaDriftTests(PostgresFixture pg)
         "sync_batch", "low_stock_state", "low_stock_alert",
     ];
 
+    [Fact]
+    public void Supported_schema_versions_contain_the_apps_db_version()
+    {
+        var kotlin = File.ReadAllText(FindAppFile("shared/src/commonMain/kotlin/ch/mathorck/easystock/data/db/AppDatabase.kt"));
+        var m = Regex.Match(kotlin, @"const\s+val\s+DB_VERSION\s*=\s*(\d+)");
+        Assert.True(m.Success, "DB_VERSION not found in AppDatabase.kt");
+        Assert.Contains(int.Parse(m.Groups[1].Value), EasyStock.Server.Helpers.CompatHelper.SupportedSchemaVersions);
+    }
+
     public static string FindAppFile(string relative)
     {
         var env = Environment.GetEnvironmentVariable("EASYSTOCK_APP_DIR");

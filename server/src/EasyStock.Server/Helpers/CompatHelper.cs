@@ -9,7 +9,8 @@ public static class CompatHelper
 
     public const int ApiVersion = 1;
 
-    public static readonly IReadOnlyList<int> SupportedSchemaVersions = [1];
+    /// <summary>App DB (Room) versions accepted in X-EasyStock-Schema-Version: the one whose shared tables this server matches (docs/schema.dbml).</summary>
+    public static readonly IReadOnlyList<int> SupportedSchemaVersions = [10];
 
     public static string ServerVersion { get; } =
         typeof(CompatHelper).Assembly.GetCustomAttribute<AssemblyInformationalVersionAttribute>()?.InformationalVersion

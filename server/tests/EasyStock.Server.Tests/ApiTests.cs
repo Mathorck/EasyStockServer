@@ -30,7 +30,7 @@ public sealed class ApiTests(PostgresFixture pg) : IDisposable
                      "supportedSchemaVersions", "setupDone", "hasData", "guestSignupEnabled" })
             Assert.True(root.TryGetProperty(name, out _), $"missing {name}");
         Assert.Equal("0.0.0", root.GetProperty("minAppVersion").GetString());
-        Assert.Equal(1, root.GetProperty("supportedSchemaVersions")[0].GetInt32());
+        Assert.Equal(10, root.GetProperty("supportedSchemaVersions")[0].GetInt32());
     }
 
     [Fact]
