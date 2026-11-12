@@ -123,10 +123,10 @@ The plan is built from `docs/03-server-spec.md` alone (362 lines). It has five p
     - Promotions get `ended_at` plus `end_reason` (`completed|cancelled|expired`). The job sets `expired` on overdue ones and deletes invites and resets that expired more than 30 days ago.
 23. **Member rights gaps.**
     - "Tags" is read as NFC tags (the `barcode` column). Members may set or clear tags on articles, items and locations.
-    - "Templates" is unclear; it probably means `category_attribute`. Admin only.
-    - Can a Member rename a location? **Decision:** yes (edit). Not reparent; soft-delete is allowed (Member has Delete, like the app).
-    - Can a Member create an `attribute_definition`? **Decision:** no, Admin only.
-    - Confirm all of this against the Kotlin `Permissions`.
+    - "Templates" is unclear; it probably means `category_attribute`. Members create and edit them (Edit), like the app.
+    - Can a Member rename a location? **Decision:** yes (edit), reparent too, and soft-delete (Member has Edit and Delete, like the app).
+    - Can a Member create an `attribute_definition`? **Decision:** yes (Edit, like the app).
+    - Confirmed against the Kotlin `Permissions`: EDITOR = READ + WRITE.
 24. **Version-header exemptions:** `/health`, `/openapi/*`, `GET /api/v1/server-info`, and `GET/HEAD /api/v1/images/*` (image loaders often can't add custom headers; confirm).
     - A missing or unparsable header gets 426 `app-too-old` (an app without headers is by definition too old).
 25. **Retention clock.** **Decision:** based on the movement's `created_at` (app epoch ms).
@@ -736,7 +736,7 @@ Per-row push reasons are a separate, smaller set inside `results[].reason`: `not
 
 1. **Schema and serialization drift from the app.** This is the highest risk. Mitigations: the dbml drift test, all DTOs in one folder, shared JSON fixtures for merges and permissions, and contract tests that use the app's real serialized JSON samples once available.
 2. **Conflict-rule divergence from BackupMerge** (suffix format, truncation, rule order, ATTRIBUTE_MERGED ID handling). Mitigation: the shared test cases are the contract. Don't ship sync until the real cases pass on both sides.
-3. **Permission semantics are per operation, not per table.** Bugs here mean either a privilege escalation (Member reparents or soft-deletes) or blocked work. Mitigation: the exhaustive role × table × operation theory test, and the classifier unit-tested on its own.
+3. **Permission semantics are per operation, not per table.** Bugs here mean either a privilege escalation (a role gets a right the app does not give it) or blocked work. Mitigation: the exhaustive role × table × operation theory test, and the classifier unit-tested on its own.
 4. **Pull skipping rows** if any writer bypasses the lock or pull isn't snapshotted. Mitigation: the trigger takes the lock, pull uses REPEATABLE READ, and the concurrency stress test runs in CI.
 5. **One unique violation aborting the push transaction.** Mitigation: code pre-checks under the lock, plus a savepoint per row, plus `ChangeTracker.Clear()`.
 6. **Refresh-token strictness causing spurious logouts** on flaky mobile networks. Mitigation: raise the grace-window decision now; it is cheap to add.

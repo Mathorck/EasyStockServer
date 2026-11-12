@@ -52,34 +52,47 @@ public sealed class SyncPushTests(PostgresFixture pg) : IDisposable
     }
 
     [Fact]
-    public async Task Member_admin_only_rows_are_rejected_not_allowed_one_by_one()
+    public async Task Member_edits_categories_creates_and_edits_attributes_and_templates_and_reparents_locations()
     {
-        var category = NewCategory();
-        var hall = NewLocation();
-        var shelf = NewLocation();
-        await _factory.SeedAsync(category, hall, shelf);
-
+        var (category, attribute, hall, shelf) = (NewCategory(), NewAttribute(), NewLocation(), NewLocation());
+        await _factory.SeedAsync(category, attribute, hall, shelf);
         var renamed = Edit(category); renamed["name"] = Unique("renamed");
+        var relabeled = Edit(attribute); relabeled["label"] = "Other";
+        var newAttribute = NewAttribute();
+        var template = new CategoryAttribute { Id = Guid.NewGuid(), CategoryId = category.Id, AttributeId = attribute.Id, CreatedAt = 1, UpdatedAt = 10 };
         var reparented = Edit(shelf); reparented["parentId"] = hall.Id.ToString();
-        var newCategory = NewCategory();
-        var attribute = NewAttribute();
+
         var answer = await _factory.PushClient(await _factory.SignInAsync(Role.Member)).PushAsync(
-            ("category", renamed), ("category", Wire(newCategory)), ("attribute_definition", Wire(attribute)),
-            ("location", reparented));
+            ("category", renamed), ("attribute_definition", relabeled), ("attribute_definition", Wire(newAttribute)),
+            ("category_attribute", Wire(template)), ("location", reparented));
 
-        Assert.Equal(HttpStatusCode.OK, answer.Status);
-        var edit = answer.Result("category", category.Id);
-        Assert.Equal("rejected", (string?)edit["status"]);
-        Assert.Equal("not-allowed", (string?)edit["reason"]);
-        Assert.Equal(category.Name, (string?)edit["row"]!["name"]); // the server's version
-        Assert.Equal("accepted", (string?)answer.Result("category", newCategory.Id)["status"]);
-        var attr = answer.Result("attribute_definition", attribute.Id);
-        Assert.Equal("not-allowed", (string?)attr["reason"]);
-        Assert.Empty(attr["row"]!.AsObject()); // no server version
-        Assert.Equal("not-allowed", (string?)answer.Result("location", shelf.Id)["reason"]);
+        Assert.All(answer.Json["results"]!.AsArray(), r => Assert.Equal("accepted", (string?)r!["status"]));
+        Assert.Equal((string?)renamed["name"], (await Row<Category>(category.Id)).Name);
+        Assert.Equal("Other", (await Row<AttributeDefinition>(attribute.Id)).Label);
+        Assert.Equal(newAttribute.Key, (await Row<AttributeDefinition>(newAttribute.Id)).Key);
+        Assert.Equal(category.Id, (await Row<CategoryAttribute>(template.Id)).CategoryId);
+        Assert.Equal(hall.Id, (await Row<Location>(shelf.Id)).ParentId);
 
-        Assert.Null((await Row<Location>(shelf.Id)).ParentId);
-        Assert.Equal(category.Name, (await Row<Category>(category.Id)).Name);
+        var editedTemplate = Edit(await Row<CategoryAttribute>(template.Id)); editedTemplate["required"] = true;
+        var second = await _factory.PushClient(await _factory.SignInAsync(Role.Member)).PushAsync(("category_attribute", editedTemplate));
+        Assert.Equal("accepted", (string?)second.Result("category_attribute", template.Id)["status"]);
+        Assert.True((await Row<CategoryAttribute>(template.Id)).Required);
+    }
+
+    [Theory]
+    [InlineData(Role.Member)]
+    [InlineData(Role.Admin)]
+    public async Task Reparenting_into_a_cycle_keeps_the_old_parent_for_members_and_admins(Role role)
+    {
+        var hall = NewLocation();
+        var shelf = NewLocation(hall.Id);
+        await _factory.SeedAsync(hall, shelf);
+        var cyclic = Edit(hall); cyclic["parentId"] = shelf.Id.ToString();
+
+        var answer = await _factory.PushClient(await _factory.SignInAsync(role)).PushAsync(("location", cyclic));
+
+        Assert.Equal("LOCATION_PARENT_KEPT", (string?)answer.Result("location", hall.Id)["conflict"]);
+        Assert.Null((await Row<Location>(hall.Id)).ParentId);
     }
 
     [Fact]
@@ -103,21 +116,19 @@ public sealed class SyncPushTests(PostgresFixture pg) : IDisposable
     }
 
     [Fact]
-    public async Task Member_cannot_rename_or_reparent_together_with_a_delete()
+    public async Task Member_renames_and_deletes_in_one_row()
     {
-        var (category, attribute, hall, shelf) = (NewCategory(), NewAttribute(), NewLocation(), NewLocation());
-        await _factory.SeedAsync(category, attribute, hall, shelf);
+        var (category, attribute) = (NewCategory(), NewAttribute());
+        await _factory.SeedAsync(category, attribute);
         var renamed = Edit(category); renamed["name"] = Unique("renamed"); renamed["deletedAt"] = 50;
         var relabeled = Edit(attribute); relabeled["label"] = "Other"; relabeled["deletedAt"] = 50;
-        var reparented = Edit(shelf); reparented["parentId"] = hall.Id.ToString(); reparented["deletedAt"] = 50;
 
         var answer = await _factory.PushClient(await _factory.SignInAsync(Role.Member)).PushAsync(
-            ("category", renamed), ("attribute_definition", relabeled), ("location", reparented));
+            ("category", renamed), ("attribute_definition", relabeled));
 
-        Assert.All(answer.Json["results"]!.AsArray(), r => Assert.Equal("not-allowed", (string?)r!["reason"]));
-        Assert.Null((await Row<Category>(category.Id)).DeletedAt);
-        Assert.Null((await Row<AttributeDefinition>(attribute.Id)).DeletedAt);
-        Assert.Null((await Row<Location>(shelf.Id)).DeletedAt);
+        Assert.All(answer.Json["results"]!.AsArray(), r => Assert.Equal("accepted", (string?)r!["status"]));
+        Assert.Equal(50, (await Row<Category>(category.Id)).DeletedAt);
+        Assert.Equal("Other", (await Row<AttributeDefinition>(attribute.Id)).Label);
     }
 
     [Fact]
@@ -446,10 +457,10 @@ public sealed class SyncPushTests(PostgresFixture pg) : IDisposable
         freshWithBase["baseSeq"] = 1; // ignored on an insert
         var badBase = Edit(article);
         badBase["baseSeq"] = "7";
-        var notAllowed = Wire(category); // a Member may not edit categories: that comes before the conflict
-        notAllowed["name"] = Unique("renamed");
+        var unseenCategory = Wire(category); // an edit of a category without a base version conflicts too
+        unseenCategory["name"] = Unique("renamed");
 
-        var answer = await member.PushAsync(("article", unseen), ("article", Wire(fresh)), ("article", freshWithBase), ("category", notAllowed));
+        var answer = await member.PushAsync(("article", unseen), ("article", Wire(fresh)), ("article", freshWithBase), ("category", unseenCategory));
         var badAnswer = await member.PushAsync(("article", badBase));
 
         Assert.Equal("conflict", (string?)answer.Result("article", article.Id)["reason"]);
@@ -458,7 +469,7 @@ public sealed class SyncPushTests(PostgresFixture pg) : IDisposable
         Assert.Equal("accepted", (string?)inserted["status"]);
         Assert.Equal(await SeqOf<Article>(fresh.Id), (long)inserted["serverSeq"]!);
         Assert.Equal("accepted", (string?)answer.Result("article", (string)freshWithBase["id"]!)["status"]);
-        Assert.Equal("not-allowed", (string?)answer.Result("category", category.Id)["reason"]);
+        Assert.Equal("conflict", (string?)answer.Result("category", category.Id)["reason"]);
         Assert.Equal("invalid", (string?)badAnswer.Result("article", article.Id)["reason"]);
     }
 
