@@ -19,6 +19,8 @@ public sealed partial class SchemaDriftTests(PostgresFixture pg)
     private static readonly string[] ServerOnlyTables =
     [
         "__EFMigrationsHistory",
+        // Auth
+        "users", "device_session", "invite", "public_invite", "promotion", "password_reset", "setup_state",
     ];
 
     public static string FindAppFile(string relative)

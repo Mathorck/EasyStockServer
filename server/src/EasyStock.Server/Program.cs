@@ -44,6 +44,8 @@ public sealed class Program
         // The OpenAPI generator has no database to migrate.
         if (!IsOpenApiGenerator)
             builder.Services.AddHostedService<DatabaseMigrator>();
+        builder.Services.AddEasyStockAuth(startupSteps: !IsOpenApiGenerator);
+        builder.Services.AddEasyStockRateLimiting();
         builder.Services.AddEasyStockForwardedHeaders();
 
         var app = builder.Build();
