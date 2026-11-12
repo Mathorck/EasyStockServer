@@ -66,3 +66,39 @@ jobs:
           name: test-results
           path: server/TestResults
           if-no-files-found: ignore
+
+  # The app's client and sync code against the Docker image (docs/05-e2e-tests.md).
+  e2e:
+    runs-on: ubuntu-latest
+    timeout-minutes: 30
+    steps:
+      - uses: actions/checkout@v4
+
+      - name: Check out the app
+        uses: actions/checkout@v4
+        with:
+          repository: Mathorck/EasyStock
+          path: app
+          token: ${{ secrets.APP_REPO_TOKEN || github.token }}
+
+      # The runner image has the Android SDK (ANDROID_HOME); Gradle installs a missing platform itself.
+      - uses: actions/setup-java@v4
+        with:
+          distribution: zulu
+          java-version: "21"
+
+      - uses: gradle/actions/setup-gradle@v4
+
+      - name: End-to-end tests
+        run: server/e2e/run.sh app
+
+      - name: Upload E2E results
+        if: always()
+        uses: actions/upload-artifact@v4
+        with:
+          name: e2e-results
+          path: |
+            app/shared/build/reports/tests/testAndroidHostTest
+            app/shared/build/test-results/testAndroidHostTest
+            server/e2e/.run/server.log
+          if-no-files-found: ignore
