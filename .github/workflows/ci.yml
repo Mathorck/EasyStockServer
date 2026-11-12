@@ -21,6 +21,15 @@ jobs:
     steps:
       - uses: actions/checkout@v4
 
+      # The drift tests compare the server with the app's schema.dbml and Permissions.kt.
+      # Private app repository: add a read-only token as the APP_REPO_TOKEN secret.
+      - name: Check out the app
+        uses: actions/checkout@v4
+        with:
+          repository: Mathorck/EasyStock
+          path: app
+          token: ${{ secrets.APP_REPO_TOKEN || github.token }}
+
       - name: Notice when the server project is missing
         if: hashFiles('server/**/*.csproj') == ''
         working-directory: .
@@ -46,6 +55,8 @@ jobs:
 
       - name: Test
         if: hashFiles('server/**/*.csproj') != ''
+        env:
+          EASYSTOCK_APP_DIR: ${{ github.workspace }}/app
         run: dotnet test --no-build -c Release --report-xunit-trx --results-directory TestResults
 
       - name: Upload test results
