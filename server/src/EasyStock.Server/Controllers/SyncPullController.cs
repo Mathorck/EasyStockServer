@@ -11,7 +11,7 @@ namespace EasyStock.Server.Controllers;
 // No [Produces]: it would rewrite the problem+json content type of the 400 answer.
 [ApiController]
 [Route("api/v1/sync/pull")]
-public sealed class SyncPullController(PullHandler builder, ICurrentUser user) : ControllerBase
+public sealed class SyncPullController(PullHandler builder, DatasetEpochHandler epochs, ICurrentUser user) : ControllerBase
 {
     /// <summary>
     /// Rows with server_seq greater than <paramref name="since"/>, at most <paramref name="limit"/> (default 500,
@@ -23,8 +23,11 @@ public sealed class SyncPullController(PullHandler builder, ICurrentUser user) :
     [ProducesResponseType<ValidationProblemDetails>(StatusCodes.Status400BadRequest, "application/problem+json")]
     [ProducesResponseType<ProblemDetails>(StatusCodes.Status401Unauthorized, "application/problem+json")]
     [ProducesResponseType<ProblemDetails>(StatusCodes.Status403Forbidden, "application/problem+json")]
+    [ProducesResponseType<ProblemDetails>(StatusCodes.Status409Conflict, "application/problem+json")]
     public async Task<IActionResult> Get(
-        [FromQuery] long since = 0, [FromQuery] int limit = PullHandler.DefaultLimit, CancellationToken ct = default)
+        [FromQuery] long since = 0, [FromQuery] int limit = PullHandler.DefaultLimit,
+        [FromHeader(Name = DatasetEpochHandler.HeaderName)] string? datasetEpoch = null,
+        CancellationToken ct = default)
     {
         var errors = new Dictionary<string, string[]>();
         if (since < 0) errors["since"] = ["must be 0 or more"];
@@ -41,6 +44,11 @@ public sealed class SyncPullController(PullHandler builder, ICurrentUser user) :
                 ContentTypes = { "application/problem+json" },
             };
 
-        return Ok(await builder.BuildAsync(user, since, limit, ct));
+        // One read for both the check and the answer: checking one value and answering another would let a phone
+        // with the old epoch store the new one next to its stale rows.
+        var epoch = await epochs.GetAsync(ct);
+        if (!DatasetEpochHandler.Accepts(datasetEpoch, epoch))
+            return ProblemTypes.DatasetResetProblem(epoch);
+        return Ok(await builder.BuildAsync(user, since, limit, epoch, ct));
     }
 }

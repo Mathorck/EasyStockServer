@@ -58,6 +58,15 @@ public static class ProblemTypes
             ContentTypes = { ContentType },
         };
 
+    /// <summary>409 dataset-reset, with the current epoch as <c>datasetEpoch</c> so the phone can store it and pull from 0.</summary>
+    public static ObjectResult DatasetResetProblem(string datasetEpoch)
+    {
+        var result = Problem(StatusCodes.Status409Conflict, DatasetReset,
+            detail: "The server data was replaced. Delete the synced data and pull again from 0.");
+        ((ProblemDetails)result.Value!).Extensions["datasetEpoch"] = datasetEpoch;
+        return result;
+    }
+
     /// <summary>Short English title shown when the caller gives none.</summary>
     public static string DefaultTitle(string type) => type switch
     {
@@ -77,6 +86,7 @@ public static class ProblemTypes
         UsernameTaken => "This username is taken",
         RoleNotAllowed => "This role is not allowed here",
         UsePromotion => "Use a promotion for Guests",
+        DatasetReset => "The server data was replaced",
         GuestLimitReached => "The Guest limit is reached",
         InviteExpired => "This invitation has expired",
         InviteUsed => "This invitation has already been used",

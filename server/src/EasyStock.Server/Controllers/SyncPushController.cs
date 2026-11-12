@@ -19,6 +19,7 @@ public sealed class SyncPushController(PushHandler processor) : ControllerBase
     /// </summary>
     [HttpPost]
     [RequirePermission(Permission.PushChanges)]
+    [DatasetEpochCheck] // 409 dataset-reset on a stale epoch, before the body is read
     [PushBodyLimit] // 413 batch-too-large when Content-Length says so
     [RequestSizeLimit(PushHandler.MaxBodyBytes)] // the backstop for a body without Content-Length
     [ProducesResponseType<SyncPushResponse>(StatusCodes.Status200OK)]
@@ -27,7 +28,10 @@ public sealed class SyncPushController(PushHandler processor) : ControllerBase
     [ProducesResponseType<ProblemDetails>(StatusCodes.Status403Forbidden, "application/problem+json")]
     [ProducesResponseType<ProblemDetails>(StatusCodes.Status409Conflict, "application/problem+json")]
     [ProducesResponseType<ProblemDetails>(StatusCodes.Status413PayloadTooLarge, "application/problem+json")]
-    public async Task<IActionResult> Push(SyncPushRequest request, CancellationToken ct)
+    public async Task<IActionResult> Push(
+        SyncPushRequest request,
+        [FromHeader(Name = DatasetEpochHandler.HeaderName)] string? datasetEpoch,
+        CancellationToken ct)
     {
         if (!Guid.TryParse(request.BatchId, out var batchId) || request.Rows is null)
             return ProblemTypes.Problem(StatusCodes.Status400BadRequest, ProblemTypes.ValidationFailed,
@@ -37,7 +41,9 @@ public sealed class SyncPushController(PushHandler processor) : ControllerBase
                 detail: $"At most {PushHandler.MaxRows} rows per batch.");
 
         var rows = request.Rows.ToDictionary(t => t.Key, t => t.Value ?? new List<JsonNode?>());
-        var outcome = await processor.PushAsync(batchId, rows, ct);
+        var outcome = await processor.PushAsync(batchId, rows, datasetEpoch, ct);
+        if (outcome.ResetEpoch is { } epoch)
+            return ProblemTypes.DatasetResetProblem(epoch);
         if (outcome.BatchIdReused)
             return ProblemTypes.Problem(StatusCodes.Status409Conflict, ProblemTypes.BatchIdReused);
         // The saved bytes, so a replayed batch gets exactly the first answer.

@@ -2135,6 +2135,13 @@
               "format": "int32",
               "default": 500
             }
+          },
+          {
+            "name": "X-EasyStock-Dataset-Epoch",
+            "in": "header",
+            "schema": {
+              "type": "string"
+            }
           }
         ],
         "responses": {
@@ -2177,6 +2184,16 @@
                 }
               }
             }
+          },
+          "409": {
+            "description": "Conflict",
+            "content": {
+              "application/problem+json": {
+                "schema": {
+                  "$ref": "#/components/schemas/ProblemDetails"
+                }
+              }
+            }
           }
         }
       }
@@ -2185,6 +2202,15 @@
       "post": {
         "tags": [
           "SyncPush"
+        ],
+        "parameters": [
+          {
+            "name": "X-EasyStock-Dataset-Epoch",
+            "in": "header",
+            "schema": {
+              "type": "string"
+            }
+          }
         ],
         "requestBody": {
           "content": {
@@ -2821,7 +2847,8 @@
           "supportedSchemaVersions",
           "setupDone",
           "hasData",
-          "guestSignupEnabled"
+          "guestSignupEnabled",
+          "datasetEpoch"
         ],
         "type": "object",
         "properties": {
@@ -2861,6 +2888,9 @@
           },
           "guestSignupEnabled": {
             "type": "boolean"
+          },
+          "datasetEpoch": {
+            "type": "string"
           }
         }
       },
@@ -2998,10 +3028,7 @@
             "type": "boolean"
           },
           "datasetEpoch": {
-            "type": [
-              "null",
-              "string"
-            ]
+            "type": "string"
           }
         }
       },

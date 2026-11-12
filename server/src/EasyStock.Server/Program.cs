@@ -53,6 +53,8 @@ public sealed class Program
         builder.Services.AddBackup();
         builder.Services.AddSyncPull();
         builder.Services.AddSyncPush();
+        // After the migrator: creates the dataset epoch on the first start and caches it.
+        builder.Services.AddDatasetEpoch(loadOnStart: !IsOpenApiGenerator);
 
         var app = builder.Build();
 

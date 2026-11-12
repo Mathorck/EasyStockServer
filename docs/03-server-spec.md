@@ -72,7 +72,7 @@ What the optional EasyStock server is, how it is built, and how it behaves. The 
 * `low_stock_state`: article ID and whether it is currently at or below its threshold, used to detect crossings.
 * `push_registration`: device session ID and UnifiedPush endpoint URL.
 * `image`: SHA-256, size, created at.
-* `setting`: key and value, for the Admin settings.
+* `setting`: key and value, for the Admin settings and the `dataset_epoch` (not editable by the Admin).
 * `setup_state` (one row): setup token hash and whether setup is done.
 
 ## First start
@@ -144,7 +144,7 @@ What the optional EasyStock server is, how it is built, and how it behaves. The 
 
 ### Public
 
-* `GET /api/v1/server-info` returns the server name, server version, API version, minimum app version, supported schema versions, whether setup is done, whether the server holds data, and whether Guest signup is on.
+* `GET /api/v1/server-info` returns the server name, server version, API version, minimum app version, supported schema versions, whether setup is done, whether the server holds data, whether Guest signup is on, and the dataset epoch (`datasetEpoch`).
 
 ### Auth
 
@@ -219,9 +219,22 @@ Pull answer:
   "users": [ { "id": "…", "displayName": "Jean" } ],
   "alerts": [ { "id": "…", "articleId": "…", "crossedAt": 1762859000000, "stock": 4000 } ],
   "next": 18342,
-  "hasMore": false
+  "hasMore": false,
+  "datasetEpoch": "3f6c2a9e-0d1b-4c55-9a2e-7b1d8e4f0c11"
 }
 ```
+
+### Dataset epoch
+
+* The server keeps a random UUID, the dataset epoch, in the `setting` table. It is created on the first start.
+* It is returned as `datasetEpoch` in `GET /server-info` and in every pull answer.
+* A replace backup import sets a new epoch, in the same transaction as the import. A merge import keeps it.
+* Phones send the epoch they hold in `X-EasyStock-Dataset-Epoch` on `GET /sync/pull` and `POST /sync/push`.
+* A different value gets 409 `dataset-reset`, with the current epoch as `datasetEpoch` in the problem body. The batch is not applied.
+* A missing or empty header is accepted, for a first sync and for older apps. Such a phone is not protected against a replace.
+* On 409 `dataset-reset` the app deletes its server-mode synced rows and cursor, stores the new epoch, and pulls from `since=0`.
+* A push refused with 409 is neither applied nor recorded, so after the reset the app may resend it with the same batch ID or drop it (app decision, to agree).
+* The server keeps the epoch in memory and reads the database only at start; push checks it again from the database under the sync lock.
 
 ### Images
 
@@ -249,7 +262,7 @@ Pull answer:
 * `PUT /admin/public-invite` turns it on or off and sets the Guest limit.
 * `POST /admin/public-invite/regenerate` creates a new token, making old printed sheets stop working, and returns the new QR content.
 * `GET /admin/backup` returns a backup file in the app's backup format, with photos.
-* `POST /admin/backup?mode=merge|replace` imports a backup file into the server.
+* `POST /admin/backup?mode=merge|replace` imports a backup file into the server. A replace sets a new dataset epoch.
 * `GET /admin/settings` and `PUT /admin/settings` read and change the server settings.
 
 ## Push processing

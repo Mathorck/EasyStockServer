@@ -18,13 +18,17 @@ namespace EasyStock.Server.Handlers.Sync;
 /// its own savepoint. Then the low-stock detector, then the saved answer.
 /// </summary>
 public sealed partial class PushHandler(
-    EasyStockDbContext db, ICurrentUser user, TimeProvider time, LowStockHandler detector, ILogger<PushHandler> log)
+    EasyStockDbContext db, ICurrentUser user, TimeProvider time, LowStockHandler detector, DatasetEpochHandler epochs,
+    ILogger<PushHandler> log)
 {
     public const int MaxRows = 5000;
     public const long MaxBodyBytes = 10 * 1024 * 1024;
 
-    /// <summary>The answer exactly as sent and saved; null with <see cref="BatchIdReused"/> set.</summary>
-    public sealed record Outcome(string? Json, bool BatchIdReused = false);
+    /// <summary>
+    /// The answer exactly as sent and saved; null with <see cref="BatchIdReused"/> set, or with <see cref="ResetEpoch"/>
+    /// (the current epoch) when the phone's dataset epoch is stale.
+    /// </summary>
+    public sealed record Outcome(string? Json, bool BatchIdReused = false, string? ResetEpoch = null);
 
     private static readonly JsonSerializerOptions ResponseOptions = new(JsonSerializerDefaults.Web);
 
@@ -40,10 +44,19 @@ public sealed partial class PushHandler(
         public HashSet<Guid> TouchedArticles { get; } = [];
     }
 
-    public async Task<Outcome> PushAsync(Guid batchId, IReadOnlyDictionary<string, List<JsonNode?>> rows, CancellationToken ct)
+    /// <param name="datasetEpoch">The phone's X-EasyStock-Dataset-Epoch header, or null.</param>
+    public async Task<Outcome> PushAsync(
+        Guid batchId, IReadOnlyDictionary<string, List<JsonNode?>> rows, string? datasetEpoch, CancellationToken ct)
     {
         await using var tx = await db.Database.BeginTransactionAsync(ct);
         await db.AcquireSyncLockAsync(ct);
+
+        // Checked again under the lock, from the database (one primary-key read): the cached epoch is only updated
+        // after an import has committed and released the lock, so a push that waited on that import passed the cached
+        // check. Before the replay lookup: sync_batch survives a replace, and an old batch must not get its old answer.
+        if (!string.IsNullOrEmpty(datasetEpoch) && await epochs.ReadAsync(db, ct) is { } current
+            && !DatasetEpochHandler.Accepts(datasetEpoch, current))
+            return new Outcome(null, ResetEpoch: current);
 
         // Checked under the lock: two identical batches at once serialise and the second gets the saved answer.
         var saved = await db.Set<SyncBatch>().AsNoTracking().FirstOrDefaultAsync(b => b.BatchId == batchId, ct);

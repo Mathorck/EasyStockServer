@@ -1,13 +1,17 @@
 using EasyStock.Server.Configuration;
 using EasyStock.Server.DB;
 using EasyStock.Server.Handlers.Auth;
+using EasyStock.Server.Handlers.Sync;
 using EasyStock.Server.Models;
 using Microsoft.EntityFrameworkCore;
 
 namespace EasyStock.Server.Handlers.ServerInfo;
 
-/// <summary>The public <c>GET /server-info</c> answer: setup state, whether the server holds data, whether Guest signup works.</summary>
-public sealed class ServerInfoHandler(EasyStockDbContext db, SetupHandler setup)
+/// <summary>
+/// The public <c>GET /server-info</c> answer: setup state, whether the server holds data, whether Guest signup works,
+/// and the dataset epoch.
+/// </summary>
+public sealed class ServerInfoHandler(EasyStockDbContext db, SetupHandler setup, DatasetEpochHandler datasetEpoch)
 {
     public async Task<Models.ServerInfo> GetAsync(CancellationToken ct) => new(
         ServerName: "EasyStock",
@@ -17,7 +21,8 @@ public sealed class ServerInfoHandler(EasyStockDbContext db, SetupHandler setup)
         SupportedSchemaVersions: Compat.SupportedSchemaVersions,
         SetupDone: await setup.IsDoneAsync(ct),
         HasData: await HasDataAsync(ct),
-        GuestSignupEnabled: await GuestSignupWorksAsync(ct));
+        GuestSignupEnabled: await GuestSignupWorksAsync(ct),
+        DatasetEpoch: await datasetEpoch.GetAsync(ct));
 
     /// <summary>A Guest can sign up only when the printed QR code is on and a token has been generated.</summary>
     private Task<bool> GuestSignupWorksAsync(CancellationToken ct) =>

@@ -26,7 +26,6 @@ namespace EasyStock.Server.Handlers.Sync;
 public sealed partial class PullHandler(
     EasyStockDbContext db,
     IPullUserDirectoryHandler userDirectory,
-    IPullDatasetEpochHandler datasetEpoch,
     ILogger<PullHandler> logger)
 {
     public const int DefaultLimit = 500;
@@ -37,7 +36,12 @@ public sealed partial class PullHandler(
 
     private readonly record struct Candidate(long Seq, string Table, object Row);
 
-    public async Task<SyncPullResponse> BuildAsync(ICurrentUser caller, long since, int limit, CancellationToken ct)
+    /// <param name="epoch">
+    /// The dataset epoch for the answer, read by the caller before this call (and before the snapshot): it only changes
+    /// after an import commits, so at worst new rows carry the old epoch (the next request gets 409 and resets), never
+    /// old rows the new one.
+    /// </param>
+    public async Task<SyncPullResponse> BuildAsync(ICurrentUser caller, long since, int limit, string epoch, CancellationToken ct)
     {
         ArgumentOutOfRangeException.ThrowIfNegative(since);
         ArgumentOutOfRangeException.ThrowIfLessThan(limit, 1);
@@ -47,8 +51,6 @@ public sealed partial class PullHandler(
         var candidates = new List<Candidate>(take * 4);
         List<Candidate> kept;
         List<SyncPullUser> users;
-        string? epoch;
-
         await using (var tx = await db.Database.BeginTransactionAsync(IsolationLevel.RepeatableRead, ct))
         {
             // Must be the first statement of the transaction.
@@ -73,7 +75,6 @@ public sealed partial class PullHandler(
             kept = candidates.Count > limit ? candidates.GetRange(0, limit) : candidates;
 
             users = await UsersAsync(kept, ct);
-            epoch = await datasetEpoch.GetAsync(ct);
             await tx.CommitAsync(ct);
         }
 

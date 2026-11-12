@@ -232,7 +232,7 @@ public sealed class SyncPullTests(PostgresFixture pg) : IAsyncLifetime
         var root = doc.RootElement;
         foreach (var name in new[] { "rows", "users", "alerts", "next", "hasMore", "datasetEpoch" })
             Assert.True(root.TryGetProperty(name, out _), $"missing {name}");
-        Assert.Equal(JsonValueKind.Null, root.GetProperty("datasetEpoch").ValueKind);
+        Assert.True(Guid.TryParse(root.GetProperty("datasetEpoch").GetString(), out _));
 
         var article = Rows(doc, "article").Single(r => r.GetProperty("id").GetString() == f.Article.Id.ToString());
         Assert.Equal(f.Article.Name, article.GetProperty("name").GetString());

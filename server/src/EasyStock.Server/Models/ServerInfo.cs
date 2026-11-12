@@ -8,4 +8,5 @@ public sealed record ServerInfo(
     IReadOnlyList<int> SupportedSchemaVersions,
     bool SetupDone,
     bool HasData,
-    bool GuestSignupEnabled);
+    bool GuestSignupEnabled,
+    string DatasetEpoch);

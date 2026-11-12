@@ -117,6 +117,7 @@ The plan is built from `docs/03-server-spec.md` alone (362 lines). It has five p
     - **Decision (needs app agreement):** setting `dataset_epoch` (a UUID), returned in `server-info` and in each pull answer, and sent by phones as `X-EasyStock-Dataset-Epoch`.
     - On a mismatch the server answers 409 `dataset-reset`, and the app wipes its server-mode data and pulls from 0.
     - Replace import generates a new epoch.
+    - **Done:** a missing header is accepted (first sync, older apps). The 409 body carries the current epoch as `datasetEpoch`. The epoch is cached in memory; push re-reads it from the database under the sync lock.
 22. **"Marks invites, reset tokens and promotions as expired"** has no column to mark.
     - **Decision:** expiry is computed (`expires_at < now`).
     - Promotions get `ended_at` plus `end_reason` (`completed|cancelled|expired`). The job sets `expired` on overdue ones and deletes invites and resets that expired more than 30 days ago.
@@ -534,7 +535,7 @@ Expose `CleanupService.RunOnceAsync()` for tests.
 - Replace import, in one transaction holding the sync lock:
   - Truncate the shared tables, `low_stock_state` and `low_stock_alert`.
   - Bulk insert (the trigger assigns seq) and recompute `low_stock_state` without creating alerts.
-  - Set a new `dataset_epoch` and push `sync` to all sessions.
+  - Set a new `dataset_epoch` and push `sync` to all sessions. The epoch is done; the `sync` push waits for the push sender (`BackupImportHooksHandler.AfterCommitAsync`).
 - Request size: 500 MB limit on this endpoint only. `RequestDecompression` handles gzip.
 
 **Tests:**

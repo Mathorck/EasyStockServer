@@ -153,7 +153,9 @@ public sealed class AdminSettingsTests(PostgresFixture pg) : IAsyncLifetime
     {
         using var scope = _factory.Services.CreateScope();
         var db = scope.ServiceProvider.GetRequiredService<EasyStockDbContext>();
-        await db.Set<Setting>().ExecuteDeleteAsync(TestContext.Current.CancellationToken);
+        // Only the Admin settings: the dataset_epoch row is shared with every host on this database.
+        await db.Set<Setting>().Where(s => s.Key == "server_name" || s.Key == "movement_author_retention_days")
+            .ExecuteDeleteAsync(TestContext.Current.CancellationToken);
     }
 
     private async Task<string?> StoredServerNameAsync(CancellationToken ct)
