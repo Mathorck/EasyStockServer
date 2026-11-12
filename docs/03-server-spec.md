@@ -233,7 +233,8 @@ Pull answer:
 * A different value gets 409 `dataset-reset`, with the current epoch as `datasetEpoch` in the problem body. The batch is not applied.
 * A missing or empty header is accepted, for a first sync and for older apps. Such a phone is not protected against a replace.
 * On 409 `dataset-reset` the app deletes its server-mode synced rows and cursor, stores the new epoch, and pulls from `since=0`.
-* A push refused with 409 is neither applied nor recorded, so after the reset the app may resend it with the same batch ID or drop it (app decision, to agree).
+* A push refused with 409 is neither applied nor recorded. The app drops it: its rows belong to the old dataset (they can bring back rows the restore removed, or point to rows that no longer exist).
+* Before wiping, the app tells the user how many local changes were not sent ("The server data was restored by an Admin: N unsent changes were discarded").
 * The server keeps the epoch in memory and reads the database only at start; push checks it again from the database under the sync lock.
 
 ### Images
