@@ -48,6 +48,7 @@ public sealed class Program
         builder.Services.AddEasyStockRateLimiting();
         builder.Services.AddEasyStockForwardedHeaders();
         builder.Services.AddImages();
+        builder.Services.AddSettings();
 
         var app = builder.Build();
 

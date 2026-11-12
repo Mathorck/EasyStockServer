@@ -23,6 +23,8 @@ public sealed partial class SchemaDriftTests(PostgresFixture pg)
         "users", "device_session", "invite", "public_invite", "promotion", "password_reset", "setup_state",
         // Images
         "image",
+        // Settings
+        "setting",
     ];
 
     public static string FindAppFile(string relative)
