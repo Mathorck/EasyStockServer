@@ -10,3 +10,6 @@ TestResults/
 # Local environment (keep the example)
 .env
 !.env.example
+
+# Claude Code agent worktrees (local only)
+.claude/worktrees/
