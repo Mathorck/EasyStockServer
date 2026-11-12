@@ -294,10 +294,14 @@ public sealed class SyncPushTests(PostgresFixture pg) : IDisposable
 
         var answer = await _factory.PushClient(user).PushAsync(("stock_movement", row));
 
-        Assert.Equal("accepted", (string?)answer.Result("stock_movement", movement.Id)["status"]);
+        var result = answer.Result("stock_movement", movement.Id);
+        Assert.Equal("accepted", (string?)result["status"]);
         var saved = await Row<StockMovement>(movement.Id);
         Assert.Equal(user.UserId, saved.CreatedBy);
         Assert.Equal(user.SessionId, saved.DeviceId);
+        // The author comes back, so the phone learns its author without waiting for a pull
+        Assert.Equal(user.UserId.ToString(), (string?)result["row"]!["createdBy"]);
+        Assert.Equal(user.SessionId.ToString(), (string?)result["row"]!["deviceId"]);
     }
 
     [Fact]

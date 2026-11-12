@@ -15,7 +15,8 @@ public sealed record SyncPushRequest(string? BatchId, Dictionary<string, List<Js
 public sealed record SyncPushResponse(IReadOnlyList<SyncPushResult> Results);
 
 /// <summary>
-/// The answer for one row. <see cref="Row"/>: the fields the server changed (<c>changed</c>; the whole server row
+/// The answer for one row. <see cref="Row"/>: the author fields (<c>id</c>, <c>createdBy</c>, <c>deviceId</c>) of an accepted movement, set by the
+/// server, the fields the server changed (<c>changed</c>; the whole server row
 /// for <c>ATTRIBUTE_MERGED</c> and <c>MOVEMENT_KEPT</c>), or its current version (<c>rejected</c>, empty when it
 /// has none). <see cref="ServerSeq"/>: the row's <c>server_seq</c> on the server after this push (the server row's
 /// for a rejected row); the phone sends it back as <c>baseSeq</c> on its next edit of the row. Absent when the

@@ -212,6 +212,7 @@ Push answer (one result per row):
 
 * `serverSeq`: the row's `server_seq` on the server after this push (for a rejected row, the server row's). Left out when the server has no such row.
 * `row` of a rejected result: the whole server row, or `{}` when there is none.
+* `row` of an accepted movement: only `id`, `createdBy` and `deviceId`, the author the server set. The phone writes those two fields on its own movement (the only change a phone makes to a movement it already has). Other accepted rows have no `row`.
 
 Pull answer:
 
@@ -279,7 +280,7 @@ Pull answer:
 * Each row is checked: allowed for this role, valid values (enums, lengths, quantities), and referenced rows exist.
 * A row that fails a check is rejected with a reason, and the server's current version of that row is returned if there is one.
 * A movement whose ID already exists is ignored and counted as accepted, since movements never change.
-* A movement row's `created_by` and `device_id` come from the token, whatever the phone sent.
+* A movement row's `created_by` and `device_id` come from the token, whatever the phone sent. They are returned in the result's `row`.
 * Other rows: the first change wins (optimistic concurrency, checked under the push lock).
   * An edit or soft delete of an existing row must carry `baseSeq` equal to the row's current `server_seq`.
   * Otherwise (the row changed since the phone saw it, or no `baseSeq`) it is rejected with reason `conflict`, the whole server row and its `serverSeq`.
@@ -343,6 +344,7 @@ Pull answer:
 * It deletes `sync_batch` rows older than 7 days.
 * It applies the retention setting: after the chosen number of days, `created_by` and `device_id` of old movements are set to null and the row gets a new `server_seq`.
 * This is the only change ever made to a movement row, and it only removes personal data.
+* Every phone gets the change by its normal pull (the new `server_seq`), and updates only `created_by` and `device_id` of the movement it already has.
 * It deletes photos no article references any more, 30 days after their last use.
 
 ## Personal data (nFADP / GDPR)

@@ -456,8 +456,12 @@ public sealed partial class PushHandler(
     // Each result carries the server_seq of the server row it leaves (none when there is no server row): the
     // phone's next baseSeq for that row.
 
+    /// <summary>An accepted movement comes back with its author fields: the phone learns the author the server set.</summary>
     private static SyncPushResult Accepted(string table, string id, object serverRow) =>
-        new(table, id, SyncPushStatusHelper.Accepted, ServerSeq: PushRowCodecHelper.ServerSeqOf(serverRow));
+        new(table, id, SyncPushStatusHelper.Accepted, ServerSeq: PushRowCodecHelper.ServerSeqOf(serverRow),
+            Row: serverRow is StockMovement m
+                ? new JsonObject { ["id"] = m.Id, ["createdBy"] = m.CreatedBy, ["deviceId"] = m.DeviceId }
+                : null);
 
     private static SyncPushResult Changed(string table, string id, string conflict, JsonObject? row, object? serverRow) =>
         new(table, id, SyncPushStatusHelper.Changed, Conflict: conflict, Row: row,

@@ -414,6 +414,29 @@ public sealed class SyncPullTests(PostgresFixture pg) : IAsyncLifetime
         Assert.Equal(Stock(member.Rows), Stock(guest.Rows));
     }
 
+    // ---- anonymized authors ----
+
+    [Fact]
+    public async Task Clearing_the_author_of_a_movement_bumps_its_seq_so_phones_pull_it()
+    {
+        var f = NewFixture();
+        var movement = Movement(f, 1000);
+        await Insert(f.Category, f.Location, f.Article, movement);
+        var since = await Cursor();
+        var before = await WithDb(db => db.StockMovements.Where(m => m.Id == movement.Id).Select(m => m.ServerSeq).SingleAsync(Ct));
+
+        // What the retention job does to an old movement
+        await WithDb(db => db.Database.ExecuteSqlAsync(
+            $"UPDATE stock_movement SET created_by = NULL, device_id = NULL WHERE id = {movement.Id}", Ct));
+
+        using var doc = await Pull(await ClientAs(Role.Member), since);
+        var row = AllRows(doc).Single(r => r.Row.GetProperty("id").GetString() == movement.Id.ToString());
+        Assert.True(row.Row.GetProperty("serverSeq").GetInt64() > before);
+        Assert.True(row.Row.GetProperty("createdBy").ValueKind is JsonValueKind.Null || !row.Row.TryGetProperty("createdBy", out _));
+        Assert.True(row.Row.GetProperty("deviceId").ValueKind is JsonValueKind.Null || !row.Row.TryGetProperty("deviceId", out _));
+        Assert.Equal(1000, row.Row.GetProperty("quantity").GetInt64());
+    }
+
     // ---- alerts ----
 
     [Fact]
