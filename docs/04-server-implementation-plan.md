@@ -124,7 +124,7 @@ The plan is built from `docs/03-server-spec.md` alone (362 lines). It has five p
 23. **Member rights gaps.**
     - "Tags" is read as NFC tags (the `barcode` column). Members may set or clear tags on articles, items and locations.
     - "Templates" is unclear; it probably means `category_attribute`. Admin only.
-    - Can a Member rename a location? **Decision:** yes (edit). Not reparent, not soft-delete.
+    - Can a Member rename a location? **Decision:** yes (edit). Not reparent; soft-delete is allowed (Member has Delete, like the app).
     - Can a Member create an `attribute_definition`? **Decision:** no, Admin only.
     - Confirm all of this against the Kotlin `Permissions`.
 24. **Version-header exemptions:** `/health`, `/openapi/*`, `GET /api/v1/server-info`, and `GET/HEAD /api/v1/images/*` (image loaders often can't add custom headers; confirm).

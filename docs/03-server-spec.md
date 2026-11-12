@@ -123,8 +123,8 @@ What the optional EasyStock server is, how it is built, and how it behaves. The 
 * Every endpoint and every pushed row is checked against `Permissions.cs`.
 * Guest: reads stock, articles, photos and locations; receives movements without author, device and comment; receives no reviews; writes nothing.
 * Viewer: everything a Guest reads, plus full movements, authors and reviews; writes nothing.
-* Member: everything a Viewer reads; creates movements; creates and edits articles, items, tags and reviews; creates categories and locations; archives articles.
-* Admin: everything a Member does; edits and deletes categories, attributes and templates; soft-deletes articles and locations; changes the location hierarchy; manages users, invites, the printed QR code, devices, backups and settings.
+* Member: everything a Viewer reads; creates movements; creates and edits articles, items, tags and reviews; creates categories and locations; archives articles; soft-deletes (and restores) articles, units (items), locations, categories, attributes and templates. A Member cannot change the location hierarchy, and cannot edit categories, attributes or templates.
+* Admin: everything a Member does; edits categories, attributes and templates; changes the location hierarchy; manages users, invites, the printed QR code, devices, backups and settings.
 * No role can update or delete a `stock_movement` row.
 * The last active Admin cannot be demoted, disabled or deleted (409).
 * A full account cannot be changed into a Guest.

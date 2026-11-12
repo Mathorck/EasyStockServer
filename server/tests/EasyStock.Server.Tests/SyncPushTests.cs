@@ -61,12 +61,11 @@ public sealed class SyncPushTests(PostgresFixture pg) : IDisposable
 
         var renamed = Edit(category); renamed["name"] = Unique("renamed");
         var reparented = Edit(shelf); reparented["parentId"] = hall.Id.ToString();
-        var deleted = Edit(hall); deleted["deletedAt"] = 50;
         var newCategory = NewCategory();
         var attribute = NewAttribute();
         var answer = await _factory.PushClient(await _factory.SignInAsync(Role.Member)).PushAsync(
             ("category", renamed), ("category", Wire(newCategory)), ("attribute_definition", Wire(attribute)),
-            ("location", reparented), ("location", deleted));
+            ("location", reparented));
 
         Assert.Equal(HttpStatusCode.OK, answer.Status);
         var edit = answer.Result("category", category.Id);
@@ -78,11 +77,62 @@ public sealed class SyncPushTests(PostgresFixture pg) : IDisposable
         Assert.Equal("not-allowed", (string?)attr["reason"]);
         Assert.Empty(attr["row"]!.AsObject()); // no server version
         Assert.Equal("not-allowed", (string?)answer.Result("location", shelf.Id)["reason"]);
-        Assert.Equal("not-allowed", (string?)answer.Result("location", hall.Id)["reason"]);
 
         Assert.Null((await Row<Location>(shelf.Id)).ParentId);
-        Assert.Null((await Row<Location>(hall.Id)).DeletedAt);
         Assert.Equal(category.Name, (await Row<Category>(category.Id)).Name);
+    }
+
+    [Fact]
+    public async Task Member_soft_deletes_articles_locations_categories_attributes_and_templates()
+    {
+        var (article, location, category, attribute) = (NewArticle(), NewLocation(), NewCategory(), NewAttribute());
+        var template = new CategoryAttribute { Id = Guid.NewGuid(), CategoryId = category.Id, AttributeId = attribute.Id, CreatedAt = 1, UpdatedAt = 10 };
+        await _factory.SeedAsync(article, location, category, attribute, template);
+        JsonObject Deleted(object e) { var row = Edit(e); row["deletedAt"] = 50; return row; }
+
+        var answer = await _factory.PushClient(await _factory.SignInAsync(Role.Member)).PushAsync(
+            ("article", Deleted(article)), ("location", Deleted(location)), ("category", Deleted(category)),
+            ("attribute_definition", Deleted(attribute)), ("category_attribute", Deleted(template)));
+
+        Assert.All(answer.Json["results"]!.AsArray(), r => Assert.Equal("accepted", (string?)r!["status"]));
+        Assert.Equal(50, (await Row<Article>(article.Id)).DeletedAt);
+        Assert.Equal(50, (await Row<Location>(location.Id)).DeletedAt);
+        Assert.Equal(50, (await Row<Category>(category.Id)).DeletedAt);
+        Assert.Equal(50, (await Row<AttributeDefinition>(attribute.Id)).DeletedAt);
+        Assert.Equal(50, (await Row<CategoryAttribute>(template.Id)).DeletedAt);
+    }
+
+    [Fact]
+    public async Task Member_cannot_rename_or_reparent_together_with_a_delete()
+    {
+        var (category, attribute, hall, shelf) = (NewCategory(), NewAttribute(), NewLocation(), NewLocation());
+        await _factory.SeedAsync(category, attribute, hall, shelf);
+        var renamed = Edit(category); renamed["name"] = Unique("renamed"); renamed["deletedAt"] = 50;
+        var relabeled = Edit(attribute); relabeled["label"] = "Other"; relabeled["deletedAt"] = 50;
+        var reparented = Edit(shelf); reparented["parentId"] = hall.Id.ToString(); reparented["deletedAt"] = 50;
+
+        var answer = await _factory.PushClient(await _factory.SignInAsync(Role.Member)).PushAsync(
+            ("category", renamed), ("attribute_definition", relabeled), ("location", reparented));
+
+        Assert.All(answer.Json["results"]!.AsArray(), r => Assert.Equal("not-allowed", (string?)r!["reason"]));
+        Assert.Null((await Row<Category>(category.Id)).DeletedAt);
+        Assert.Null((await Row<AttributeDefinition>(attribute.Id)).DeletedAt);
+        Assert.Null((await Row<Location>(shelf.Id)).DeletedAt);
+    }
+
+    [Fact]
+    public async Task Member_restores_a_soft_deleted_article()
+    {
+        var article = NewArticle();
+        article.DeletedAt = 40;
+        await _factory.SeedAsync(article);
+        var row = Edit(article);
+        row["deletedAt"] = null;
+
+        var answer = await _factory.PushClient(await _factory.SignInAsync(Role.Member)).PushAsync(("article", row));
+
+        Assert.Equal("accepted", (string?)answer.Result("article", article.Id)["status"]);
+        Assert.Null((await Row<Article>(article.Id)).DeletedAt);
     }
 
     [Fact]
