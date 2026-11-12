@@ -15,7 +15,7 @@ RUN dotnet publish src/EasyStock.Server -c Release -a "$(cat /arch)" --no-restor
 
 FROM mcr.microsoft.com/dotnet/aspnet:10.0
 ARG VERSION=0.0.0
-LABEL org.opencontainers.image.source="https://github.com/Mathorck/EasyStock" \
+LABEL org.opencontainers.image.source="https://github.com/Mathorck/EasyStockServer" \
       org.opencontainers.image.version="$VERSION"
 ENV ASPNETCORE_HTTP_PORTS=8080 \
     EASYSTOCK_DATA_DIR=/data \
