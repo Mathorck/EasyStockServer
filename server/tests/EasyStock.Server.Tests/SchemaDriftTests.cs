@@ -21,6 +21,8 @@ public sealed partial class SchemaDriftTests(PostgresFixture pg)
         "__EFMigrationsHistory",
         // Auth
         "users", "device_session", "invite", "public_invite", "promotion", "password_reset", "setup_state",
+        // Images
+        "image",
     ];
 
     public static string FindAppFile(string relative)

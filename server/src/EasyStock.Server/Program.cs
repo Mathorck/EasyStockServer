@@ -47,6 +47,7 @@ public sealed class Program
         builder.Services.AddEasyStockAuth(startupSteps: !IsOpenApiGenerator);
         builder.Services.AddEasyStockRateLimiting();
         builder.Services.AddEasyStockForwardedHeaders();
+        builder.Services.AddImages();
 
         var app = builder.Build();
 
