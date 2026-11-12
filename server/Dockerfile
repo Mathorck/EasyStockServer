@@ -11,7 +11,7 @@ RUN case "$TARGETARCH" in amd64) A=x64 ;; arm64) A=arm64 ;; *) A=$TARGETARCH ;; 
 COPY src/ src/
 # Cross-compiled on the build platform, so arm64 images need no QEMU for the build.
 RUN dotnet publish src/EasyStock.Server -c Release -a "$(cat /arch)" --no-restore \
-    -p:Version="$VERSION" -p:UseAppHost=false -o /out
+    -p:Version="$VERSION" -p:UseAppHost=false -p:OpenApiGenerateDocuments=false -o /out
 
 FROM mcr.microsoft.com/dotnet/aspnet:10.0
 ARG VERSION=0.0.0

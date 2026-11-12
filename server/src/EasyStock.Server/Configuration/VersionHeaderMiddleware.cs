@@ -1,4 +1,4 @@
-namespace EasyStock.Server.Infrastructure;
+namespace EasyStock.Server.Configuration;
 
 /// <summary>Rejects requests without acceptable X-EasyStock-App-Version and X-EasyStock-Schema-Version headers.</summary>
 public sealed class VersionHeaderMiddleware(RequestDelegate next)
@@ -30,7 +30,7 @@ public sealed class VersionHeaderMiddleware(RequestDelegate next)
 
     private static Task Reject(HttpContext ctx) =>
         Results.Problem(
-            type: "app-too-old",
+            type: ProblemTypes.AppTooOld,
             title: "App version not supported",
             detail: "Update the EasyStock app.",
             statusCode: StatusCodes.Status426UpgradeRequired).ExecuteAsync(ctx);

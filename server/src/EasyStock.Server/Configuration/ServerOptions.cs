@@ -1,7 +1,7 @@
 using System.Net;
 using Microsoft.Extensions.Options;
 
-namespace EasyStock.Server.Infrastructure;
+namespace EasyStock.Server.Configuration;
 
 /// <summary>Settings read from EASYSTOCK_* environment variables.</summary>
 public sealed class ServerOptions
@@ -10,7 +10,8 @@ public sealed class ServerOptions
     public string PublicUrl { get; set; } = "";
     public string DataDir { get; set; } = "/data";
     public string? CertFingerprint { get; set; }
-    public string LogLevel { get; set; } = "Information";
+    /// <summary>Null when unset: the "Serilog" configuration section decides.</summary>
+    public string? LogLevel { get; set; }
     public IReadOnlyList<string> TrustedProxies { get; set; } = [];
 
     public static ServerOptions From(IConfiguration c) => new()
@@ -19,7 +20,7 @@ public sealed class ServerOptions
         PublicUrl = c["EASYSTOCK_PUBLIC_URL"] ?? "",
         DataDir = NonEmpty(c["EASYSTOCK_DATA_DIR"]) ?? "/data",
         CertFingerprint = NonEmpty(c["EASYSTOCK_CERT_FINGERPRINT"]),
-        LogLevel = NonEmpty(c["EASYSTOCK_LOG_LEVEL"]) ?? "Information",
+        LogLevel = NonEmpty(c["EASYSTOCK_LOG_LEVEL"]),
         TrustedProxies = (c["EASYSTOCK_TRUSTED_PROXIES"] ?? "")
             .Split(',', StringSplitOptions.RemoveEmptyEntries | StringSplitOptions.TrimEntries),
     };
@@ -38,8 +39,8 @@ public sealed class ServerOptionsValidator : IValidateOptions<ServerOptions>
             errors.Add("EASYSTOCK_PUBLIC_URL is required.");
         else if (!Uri.TryCreate(o.PublicUrl, UriKind.Absolute, out var u) || (u.Scheme != "http" && u.Scheme != "https"))
             errors.Add("EASYSTOCK_PUBLIC_URL must be an absolute http(s) URL.");
-        if (!Enum.TryParse<LogLevel>(o.LogLevel, ignoreCase: true, out _))
-            errors.Add($"EASYSTOCK_LOG_LEVEL '{o.LogLevel}' is not a valid log level.");
+        if (o.LogLevel is not null && !Logging.TryParseLevel(o.LogLevel, out _))
+            errors.Add($"EASYSTOCK_LOG_LEVEL '{o.LogLevel}' is not a valid log level (use one of: {string.Join(", ", Logging.LevelNames)}).");
         foreach (var p in o.TrustedProxies)
         {
             var ok = p.Contains('/') ? System.Net.IPNetwork.TryParse(p, out _) : IPAddress.TryParse(p, out _);

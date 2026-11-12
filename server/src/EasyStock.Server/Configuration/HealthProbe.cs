@@ -1,4 +1,4 @@
-namespace EasyStock.Server.Infrastructure;
+namespace EasyStock.Server.Configuration;
 
 /// <summary>Used by the Docker HEALTHCHECK: the runtime image has no curl or wget.</summary>
 public static class HealthProbe

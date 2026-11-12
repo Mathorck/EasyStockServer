@@ -101,10 +101,12 @@ All settings come from environment variables, with safe defaults. Everything els
 | `EASYSTOCK_PUBLIC_URL` | yes | | Address phones use, written into QR codes (absolute `http(s)` URL) |
 | `EASYSTOCK_DATA_DIR` | no | `/data` | Folder for photos, the signing key and data-protection keys |
 | `EASYSTOCK_CERT_FINGERPRINT` | no | | SHA-256 of a self-signed certificate, written into QR codes |
-| `EASYSTOCK_LOG_LEVEL` | no | `Information` | Log level |
+| `EASYSTOCK_LOG_LEVEL` | no | from `appsettings.json` (`Information`) | Log level: `Verbose`/`Trace`, `Debug`, `Information`, `Warning`, `Error`, `Fatal`/`Critical`. Overrides `appsettings.json` |
 | `EASYSTOCK_TRUSTED_PROXIES` | no | empty | Comma-separated IPs or CIDR ranges of your reverse proxy |
 
 The server refuses to start if a required variable is missing or invalid.
+
+Logging uses Serilog and writes to the console. Levels can also be set in the `Serilog` section of `appsettings.json`, or with variables such as `Serilog__MinimumLevel__Override__Microsoft.AspNetCore=Information`. SQL commands always stay at `Warning`.
 
 > **Set `EASYSTOCK_TRUSTED_PROXIES` when you use a reverse proxy.** Without it, the server does not trust `X-Forwarded-For`, so all clients behind the proxy share one rate-limit bucket.
 

@@ -1,6 +1,6 @@
 using System.Reflection;
 
-namespace EasyStock.Server.Infrastructure;
+namespace EasyStock.Server.Configuration;
 
 /// <summary>Version constants. Placeholders until the app side defines real values.</summary>
 public static class Compat
