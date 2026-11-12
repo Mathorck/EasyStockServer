@@ -25,6 +25,8 @@ public sealed partial class SchemaDriftTests(PostgresFixture pg)
         "image",
         // Settings
         "setting",
+        // Push registration
+        "push_registration",
     ];
 
     public static string FindAppFile(string relative)
