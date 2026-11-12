@@ -41,6 +41,31 @@ public static class PushRowCodecHelper
         }
     }
 
+    /// <summary>
+    /// Push-only row field: the <c>server_seq</c> of the server version the phone edited (from pull, or the
+    /// <c>serverSeq</c> of a push result). Absent on a row the phone never received from the server.
+    /// </summary>
+    public const string BaseSeq = "baseSeq";
+
+    /// <summary>
+    /// The row's <see cref="BaseSeq"/>: null when absent or null. False when it is there but not a whole number &gt;= 0.
+    /// </summary>
+    public static bool TryReadBaseSeq(JsonObject row, out long? baseSeq)
+    {
+        baseSeq = null;
+        if (row[BaseSeq] is not { } node) return true;
+        if (node is JsonValue v && v.GetValueKind() == JsonValueKind.Number && v.TryGetValue<long>(out var seq) && seq >= 0)
+        {
+            baseSeq = seq;
+            return true;
+        }
+        return false;
+    }
+
+    /// <summary>The <c>server_seq</c> of a shared-table entity.</summary>
+    public static long ServerSeqOf(object entity) =>
+        (long)entity.GetType().GetProperty(nameof(Category.ServerSeq))!.GetValue(entity)!;
+
     /// <summary>The wire row of an entity, without the server-only fields.</summary>
     public static JsonObject Write(object entity)
     {

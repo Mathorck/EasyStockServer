@@ -59,9 +59,9 @@ public sealed class SyncPushTests(PostgresFixture pg) : IDisposable
         var shelf = NewLocation();
         await _factory.SeedAsync(category, hall, shelf);
 
-        var renamed = Wire(category); renamed["name"] = Unique("renamed");
-        var reparented = Wire(shelf); reparented["parentId"] = hall.Id.ToString();
-        var deleted = Wire(hall); deleted["deletedAt"] = 50;
+        var renamed = Edit(category); renamed["name"] = Unique("renamed");
+        var reparented = Edit(shelf); reparented["parentId"] = hall.Id.ToString();
+        var deleted = Edit(hall); deleted["deletedAt"] = 50;
         var newCategory = NewCategory();
         var attribute = NewAttribute();
         var answer = await _factory.PushClient(await _factory.SignInAsync(Role.Member)).PushAsync(
@@ -90,7 +90,7 @@ public sealed class SyncPushTests(PostgresFixture pg) : IDisposable
     {
         var shelf = NewLocation();
         await _factory.SeedAsync(shelf);
-        var row = Wire(shelf);
+        var row = Edit(shelf);
         row["name"] = Unique("renamed");
         row["barcode"] = Unique("tag");
 
@@ -109,9 +109,9 @@ public sealed class SyncPushTests(PostgresFixture pg) : IDisposable
         var hall = NewLocation();
         var shelf = NewLocation();
         await _factory.SeedAsync(category, hall, shelf);
-        var renamed = Wire(category); renamed["name"] = Unique("renamed");
-        var reparented = Wire(shelf); reparented["parentId"] = hall.Id.ToString();
-        var deleted = Wire(hall); deleted["deletedAt"] = 50;
+        var renamed = Edit(category); renamed["name"] = Unique("renamed");
+        var reparented = Edit(shelf); reparented["parentId"] = hall.Id.ToString();
+        var deleted = Edit(hall); deleted["deletedAt"] = 50;
 
         var answer = await _factory.PushClient(await _factory.SignInAsync(Role.Admin)).PushAsync(
             ("category", renamed), ("location", reparented), ("location", deleted));
@@ -207,7 +207,7 @@ public sealed class SyncPushTests(PostgresFixture pg) : IDisposable
         var hall = NewLocation();
         var shelf = NewLocation(hall.Id);
         await _factory.SeedAsync(hall, shelf);
-        var row = Wire(shelf);
+        var row = Edit(shelf);
         row["parentId"] = shelf.Id.ToString();
 
         var answer = await _factory.PushClient(await _factory.SignInAsync(Role.Admin)).PushAsync(("location", row));
@@ -297,24 +297,139 @@ public sealed class SyncPushTests(PostgresFixture pg) : IDisposable
         Assert.Equal("review-open", (string?)result["reason"]);
     }
 
+    // ---- First change wins ----
+
+    private Task<long> SeqOf<T>(Guid id) where T : class =>
+        _factory.QueryAsync(db => db.Set<T>().Where(e => EF.Property<Guid>(e, "Id") == id)
+            .Select(e => EF.Property<long>(e, nameof(Category.ServerSeq))).SingleAsync(Ct));
+
     [Fact]
-    public async Task Last_write_wins_in_receive_order_not_by_updated_at()
+    public async Task Stale_edit_is_rejected_with_the_server_row_and_wins_when_pushed_again_from_it()
     {
-        // Spec "Push processing": unlike BackupMerge (newer-change-wins.json), an older updatedAt still wins.
+        // Spec "Push processing": two phones edit the same version; the first push wins, the second gets a conflict.
         var article = NewArticle();
-        article.UpdatedAt = 30;
         await _factory.SeedAsync(article);
-        var row = Wire(article);
-        row["name"] = Unique("older");
-        row["updatedAt"] = 20;
-        row["deletedAt"] = 20;
+        var phoneA = _factory.PushClient(await _factory.SignInAsync(Role.Member));
+        var phoneB = _factory.PushClient(await _factory.SignInAsync(Role.Member));
+        var first = Edit(article); first["name"] = Unique("first");
+        var second = Edit(article); second["name"] = Unique("second");
+        second["updatedAt"] = 99; // a newer updatedAt changes nothing
 
-        var answer = await _factory.PushClient(await _factory.SignInAsync(Role.Admin)).PushAsync(("article", row));
+        var a = (await phoneA.PushAsync(("article", first))).Result("article", article.Id);
+        Assert.Equal("accepted", (string?)a["status"]);
+        Assert.Equal(await SeqOf<Article>(article.Id), (long)a["serverSeq"]!);
+        Assert.True((long)a["serverSeq"]! > article.ServerSeq);
 
-        Assert.Equal("accepted", (string?)answer.Result("article", article.Id)["status"]);
-        var saved = await Row<Article>(article.Id);
-        Assert.Equal((string?)row["name"], saved.Name);
-        Assert.Equal(20, saved.DeletedAt);
+        var b = (await phoneB.PushAsync(("article", second))).Result("article", article.Id);
+        Assert.Equal("rejected", (string?)b["status"]);
+        Assert.Equal("conflict", (string?)b["reason"]);
+        Assert.Equal((string?)first["name"], (string?)b["row"]!["name"]); // the server row, for the popup
+        Assert.Equal((long)a["serverSeq"]!, (long)b["serverSeq"]!);
+        Assert.Equal((string?)first["name"], (await Row<Article>(article.Id)).Name);
+
+        // "Keep mine": the same change again, based on the server version just received.
+        second["baseSeq"] = (long)b["serverSeq"]!;
+        var again = (await phoneB.PushAsync(("article", second))).Result("article", article.Id);
+        Assert.Equal("accepted", (string?)again["status"]);
+        Assert.Equal(await SeqOf<Article>(article.Id), (long)again["serverSeq"]!);
+        Assert.Equal((string?)second["name"], (await Row<Article>(article.Id)).Name);
+    }
+
+    [Fact]
+    public async Task Same_device_edits_twice_with_the_returned_seq()
+    {
+        var category = NewCategory();
+        await _factory.SeedAsync(category);
+        var client = _factory.PushClient(await _factory.SignInAsync(Role.Admin));
+        var row = Edit(category);
+        row["name"] = Unique("one");
+
+        var first = (await client.PushAsync(("category", row))).Result("category", category.Id);
+        row["name"] = Unique("two");
+        row["baseSeq"] = (long)first["serverSeq"]!;
+        var second = (await client.PushAsync(("category", row))).Result("category", category.Id);
+
+        Assert.Equal("accepted", (string?)first["status"]);
+        Assert.Equal("accepted", (string?)second["status"]);
+        Assert.Equal((string?)row["name"], (await Row<Category>(category.Id)).Name);
+    }
+
+    [Fact]
+    public async Task Delete_and_edit_of_the_same_version_conflict_both_ways()
+    {
+        var (deletedFirst, editedFirst) = (NewArticle(), NewArticle());
+        await _factory.SeedAsync(deletedFirst, editedFirst);
+        var phoneA = _factory.PushClient(await _factory.SignInAsync(Role.Admin));
+        var phoneB = _factory.PushClient(await _factory.SignInAsync(Role.Admin));
+
+        // Deleted, then edited from the old version: the delete stays, the edit gets the deleted row.
+        var delete = Edit(deletedFirst); delete["deletedAt"] = 50;
+        var edit = Edit(deletedFirst); edit["name"] = Unique("edited");
+        Assert.Equal("accepted", (string?)(await phoneA.PushAsync(("article", delete))).Result("article", deletedFirst.Id)["status"]);
+        var late = (await phoneB.PushAsync(("article", edit))).Result("article", deletedFirst.Id);
+        Assert.Equal("conflict", (string?)late["reason"]);
+        Assert.Equal(50, (long)late["row"]!["deletedAt"]!);
+        Assert.Equal(50, (await Row<Article>(deletedFirst.Id)).DeletedAt);
+
+        // Edited, then deleted from the old version: the edit stays, the delete gets the edited row.
+        edit = Edit(editedFirst); edit["name"] = Unique("edited");
+        delete = Edit(editedFirst); delete["deletedAt"] = 50;
+        Assert.Equal("accepted", (string?)(await phoneA.PushAsync(("article", edit))).Result("article", editedFirst.Id)["status"]);
+        late = (await phoneB.PushAsync(("article", delete))).Result("article", editedFirst.Id);
+        Assert.Equal("conflict", (string?)late["reason"]);
+        Assert.Equal((string?)edit["name"], (string?)late["row"]!["name"]);
+        var saved = await Row<Article>(editedFirst.Id);
+        Assert.Null(saved.DeletedAt);
+        Assert.Equal((string?)edit["name"], saved.Name);
+    }
+
+    [Fact]
+    public async Task Edit_without_base_seq_conflicts_new_rows_do_not()
+    {
+        var (article, category) = (NewArticle(), NewCategory());
+        await _factory.SeedAsync(article, category);
+        var member = _factory.PushClient(await _factory.SignInAsync(Role.Member));
+        var unseen = Wire(article); // the phone never received this row
+        unseen["name"] = Unique("unseen");
+        var fresh = NewArticle();
+        var freshWithBase = Wire(NewArticle());
+        freshWithBase["baseSeq"] = 1; // ignored on an insert
+        var badBase = Edit(article);
+        badBase["baseSeq"] = "7";
+        var notAllowed = Wire(category); // a Member may not edit categories: that comes before the conflict
+        notAllowed["name"] = Unique("renamed");
+
+        var answer = await member.PushAsync(("article", unseen), ("article", Wire(fresh)), ("article", freshWithBase), ("category", notAllowed));
+        var badAnswer = await member.PushAsync(("article", badBase));
+
+        Assert.Equal("conflict", (string?)answer.Result("article", article.Id)["reason"]);
+        Assert.Equal(article.Name, (await Row<Article>(article.Id)).Name);
+        var inserted = answer.Result("article", fresh.Id);
+        Assert.Equal("accepted", (string?)inserted["status"]);
+        Assert.Equal(await SeqOf<Article>(fresh.Id), (long)inserted["serverSeq"]!);
+        Assert.Equal("accepted", (string?)answer.Result("article", (string)freshWithBase["id"]!)["status"]);
+        Assert.Equal("not-allowed", (string?)answer.Result("category", category.Id)["reason"]);
+        Assert.Equal("invalid", (string?)badAnswer.Result("article", article.Id)["reason"]);
+    }
+
+    [Fact]
+    public async Task Replayed_batch_with_a_conflict_returns_the_first_answer()
+    {
+        var article = NewArticle();
+        await _factory.SeedAsync(article);
+        var user = await _factory.SignInAsync(Role.Member);
+        var client = _factory.PushClient(user);
+        var winner = Edit(article); winner["name"] = Unique("winner");
+        await _factory.PushClient(await _factory.SignInAsync(Role.Member)).PushAsync(("article", winner));
+        var stale = Edit(article); stale["name"] = Unique("stale");
+        var body = Body(Guid.NewGuid(), ("article", stale));
+
+        var first = await client.PushAsync(body);
+        var again = await client.PushAsync(body);
+
+        Assert.Equal("conflict", (string?)first.Result("article", article.Id)["reason"]);
+        Assert.Equal(first.Text, again.Text);
+        Assert.Equal((string?)winner["name"], (await Row<Article>(article.Id)).Name);
     }
 
     [Fact]
@@ -328,6 +443,7 @@ public sealed class SyncPushTests(PostgresFixture pg) : IDisposable
         var answer = await _factory.PushClient(await _factory.SignInAsync(Role.Member)).PushAsync(("category", Wire(category)));
 
         Assert.Equal("accepted", (string?)answer.Result("category", category.Id)["status"]);
+        Assert.Equal(seq, (long)answer.Result("category", category.Id)["serverSeq"]!);
         Assert.Equal(seq, (await Row<Category>(category.Id)).ServerSeq);
     }
 
@@ -347,6 +463,7 @@ public sealed class SyncPushTests(PostgresFixture pg) : IDisposable
         var result = answer.Result("article", incoming.Id);
         Assert.Equal("changed", (string?)result["status"]);
         Assert.Equal("SKU_RENAMED", (string?)result["conflict"]); // the first rule that applied
+        Assert.Equal(await SeqOf<Article>(incoming.Id), (long)result["serverSeq"]!);
         var row = result["row"]!.AsObject();
         Assert.Equal(["barcode", "sku"], row.Select(f => f.Key).Order());
         Assert.Equal(incoming.Sku + " (2)", (string?)row["sku"]);
@@ -373,6 +490,7 @@ public sealed class SyncPushTests(PostgresFixture pg) : IDisposable
         var merged = answer.Result("attribute_definition", phone.Id);
         Assert.Equal("ATTRIBUTE_MERGED", (string?)merged["conflict"]);
         Assert.Equal(server.Id.ToString(), (string?)merged["row"]!["id"]);
+        Assert.Equal(await SeqOf<AttributeDefinition>(server.Id), (long)merged["serverSeq"]!);
         Assert.Equal("measure", (string?)merged["row"]!["dataType"]); // number -> measure is one way
         Assert.Equal("accepted", (string?)answer.Result("category_attribute", link.Id)["status"]);
         Assert.Equal(server.Id, (await Row<CategoryAttribute>(link.Id)).AttributeId);
@@ -385,7 +503,7 @@ public sealed class SyncPushTests(PostgresFixture pg) : IDisposable
     {
         var attribute = NewAttribute();
         await _factory.SeedAsync(attribute);
-        var row = Wire(attribute);
+        var row = Edit(attribute);
         row["key"] = Unique("other");
         row["label"] = "New label";
 
@@ -477,7 +595,7 @@ public sealed class SyncPushTests(PostgresFixture pg) : IDisposable
         var article = NewArticle();
         var location = NewLocation();
         await _factory.SeedAsync(article, location, NewMovement(article, location, 1000));
-        var row = Wire(article);
+        var row = Edit(article);
         row["threshold"] = 2000;
 
         await _factory.PushClient(await _factory.SignInAsync(Role.Member)).PushAsync(("article", row));

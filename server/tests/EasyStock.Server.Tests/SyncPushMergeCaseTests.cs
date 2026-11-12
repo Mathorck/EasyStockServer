@@ -14,14 +14,16 @@ namespace EasyStock.Server.Tests;
 /// The app's docs/test-cases/merge/*.json, run through POST /sync/push: <c>existing</c> is seeded on the server,
 /// <c>incoming</c> pushed by a user of <c>actorRole</c>. Each case runs in its own database. Short IDs ("c1") are
 /// mapped to UUIDs. Results not listed in <c>expected.results</c> must be accepted; listed rows are partial.
+/// An incoming row with the ID of an existing one gets that row's <c>baseSeq</c>: the phone had pulled it.
 /// </summary>
 public sealed class SyncPushMergeCaseTests(PostgresFixture pg)
 {
     /// <summary>Cases whose BackupMerge rule the server deliberately doesn't follow.</summary>
     private static readonly Dictionary<string, string> NotForPush = new()
     {
-        ["newer-change-wins"] = "BackupMerge keeps the newer updatedAt; push is last write wins in receive order "
-            + "(docs/03-server-spec.md, Push processing). See SyncPushTests.Last_write_wins_in_receive_order_not_by_updated_at.",
+        ["newer-change-wins"] = "BackupMerge keeps the newer updatedAt; push ignores updatedAt: an edit based on the "
+            + "current server version is applied, a stale one is rejected as a conflict (docs/03-server-spec.md, Push "
+            + "processing). See SyncPushTests.Stale_edit_is_rejected_with_the_server_row_and_wins_when_pushed_again_from_it.",
     };
 
     public static TheoryData<string> Cases()
@@ -52,23 +54,35 @@ public sealed class SyncPushMergeCaseTests(PostgresFixture pg)
 
         // existing
         var existing = test["existing"]?.AsObject() ?? [];
+        var seeded = new List<(string Table, object Row)>();
         await using (var scope = factory.Services.CreateAsyncScope())
         {
             var db = scope.ServiceProvider.GetRequiredService<EasyStockDbContext>();
             foreach (var table in PushTablesHelper.PushOrder.Where(existing.ContainsKey))
                 foreach (var row in existing[table]!.AsArray())
-                    db.Add(PushRowCodecHelper.TryRead(table, ids.ToServer(row!).AsObject())
-                        ?? throw new InvalidOperationException($"{name}: existing {table} row doesn't parse"));
+                {
+                    var entity = PushRowCodecHelper.TryRead(table, ids.ToServer(row!).AsObject())
+                        ?? throw new InvalidOperationException($"{name}: existing {table} row doesn't parse");
+                    db.Add(entity);
+                    seeded.Add((table, entity));
+                }
             await db.SaveChangesAsync(ct);
         }
+        // server_seq of each seeded row (set by the trigger, read back on save), by table and wire ID
+        var baseSeqs = seeded.ToDictionary(
+            s => (s.Table, (string?)PushRowCodecHelper.Write(s.Row)["id"]), s => PushRowCodecHelper.ServerSeqOf(s.Row));
 
         // incoming
         var role = Permissions.ParseRole((string?)test["actorRole"]) ?? throw new InvalidOperationException("actorRole");
-        var incoming = test["incoming"]!.AsObject();
+        var incoming = ids.ToServer(test["incoming"]!).AsObject();
+        foreach (var (table, rows) in incoming)
+            foreach (var row in rows!.AsArray().Select(r => r!.AsObject()))
+                if (baseSeqs.TryGetValue((table, (string?)row["id"]), out var seq))
+                    row[PushRowCodecHelper.BaseSeq] = seq;
         var body = new JsonObject
         {
             ["batchId"] = Guid.NewGuid().ToString(),
-            ["rows"] = ids.ToServer(incoming),
+            ["rows"] = incoming,
         };
         var answer = await factory.PushClient(await factory.SignInAsync(role)).PushAsync(body);
         Assert.Equal(System.Net.HttpStatusCode.OK, answer.Status);

@@ -35,6 +35,19 @@ public static class SyncPushKit
     /// <summary>The wire row of an entity, as the app would send it.</summary>
     public static JsonObject Wire(object entity) => PushRowCodecHelper.Write(entity);
 
+    /// <summary>
+    /// The wire row of a seeded entity as the app sends an edit of it: with <c>baseSeq</c>, the server_seq the
+    /// phone last saw (the entity's, filled in by <see cref="SeedAsync"/>).
+    /// </summary>
+    public static JsonObject Edit(object entity)
+    {
+        var seq = PushRowCodecHelper.ServerSeqOf(entity);
+        Assert.True(seq > 0, "Edit() needs a seeded entity");
+        var row = Wire(entity);
+        row[PushRowCodecHelper.BaseSeq] = seq;
+        return row;
+    }
+
     public static JsonObject Body(Guid batchId, params (string Table, JsonObject Row)[] rows)
     {
         var tables = new JsonObject();

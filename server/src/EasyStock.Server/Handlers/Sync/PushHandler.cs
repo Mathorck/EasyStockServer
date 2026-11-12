@@ -14,7 +14,7 @@ namespace EasyStock.Server.Handlers.Sync;
 /// <summary>
 /// Applies one push batch (docs/03-server-spec.md "Push processing", docs/04-server-implementation-plan.md
 /// Phase 8): one transaction under the sync lock, idempotent by batch ID, rows in dependency order, each one
-/// checked (role, values, references), adjusted by the conflict rules of the app's BackupMerge, then saved under
+/// checked (role, values, references, first change wins by baseSeq), adjusted by the conflict rules of the app's BackupMerge, then saved under
 /// its own savepoint. Then the low-stock detector, then the saved answer.
 /// </summary>
 public sealed partial class PushHandler(
@@ -160,7 +160,7 @@ public sealed partial class PushHandler(
             // Including soft-deleted rows: the push may restore one, and references to them are valid.
             var existing = await db.FindAsync(type, [id], ct);
             var incoming = PushRowCodecHelper.TryRead(table, pending.Row);
-            if (incoming is null)
+            if (incoming is null || !PushRowCodecHelper.TryReadBaseSeq(pending.Row, out var baseSeq))
                 return Rejected(table, rawId, SyncPushReasonHelper.Invalid, existing);
             if (incoming is CategoryAttribute link && state.AttributeAliases.TryGetValue(link.AttributeId, out var mergedInto))
                 link.AttributeId = mergedInto;
@@ -169,13 +169,13 @@ public sealed partial class PushHandler(
             if (existing is StockMovement kept)
             {
                 return SameMovement((StockMovement)incoming, kept)
-                    ? Accepted(table, rawId)
-                    : Changed(table, rawId, SyncPushConflictHelper.MovementKept, PushRowCodecHelper.Write(kept));
+                    ? Accepted(table, rawId, kept)
+                    : Changed(table, rawId, SyncPushConflictHelper.MovementKept, PushRowCodecHelper.Write(kept), kept);
             }
 
-            // An identical no-op is accepted without a write and without a seq bump, whatever the role.
+            // An identical no-op is accepted without a write and without a seq bump, whatever the role and baseSeq.
             if (existing is not null && PushRowCodecHelper.SameContent(incoming, existing))
-                return Accepted(table, rawId);
+                return Accepted(table, rawId, existing);
 
             if (!PushPermissionsHelper.IsAllowed(user.Role, incoming, existing))
                 return Rejected(table, rawId, SyncPushReasonHelper.NotAllowed, existing);
@@ -184,10 +184,15 @@ public sealed partial class PushHandler(
             if (await ReferenceProblemAsync(incoming, ct) is { } problem)
                 return Rejected(table, rawId, problem, existing);
 
+            // First change wins: an edit of a server row must be based on its current version. A stale one (or one
+            // without baseSeq: the phone never saw the row) is rejected with the server row, for the app to ask.
+            if (existing is not null && baseSeq != PushRowCodecHelper.ServerSeqOf(existing))
+                return Rejected(table, rawId, SyncPushReasonHelper.Conflict, existing);
+
             var before = PushRowCodecHelper.Write(incoming);
             var rule = await ApplyRulesAsync(incoming, existing, state, ct);
             if (rule.Skip)
-                return Changed(table, rawId, rule.Conflict!, null);
+                return Changed(table, rawId, rule.Conflict!, null, existing);
             var target = rule.Target ?? existing;
 
             if (target is null || !PushRowCodecHelper.SameContent(incoming, target))
@@ -201,9 +206,11 @@ public sealed partial class PushHandler(
             if (incoming is Article article) state.TouchedArticles.Add(article.Id);
             if (incoming is StockMovement movement) state.TouchedArticles.Add(movement.ArticleId);
 
-            if (rule.Conflict is null) return Accepted(table, rawId);
+            // The saved row: the server one on an update (the trigger's new server_seq is read back), else the new one.
+            var saved = target ?? incoming;
+            if (rule.Conflict is null) return Accepted(table, rawId, saved);
             var after = PushRowCodecHelper.Write(incoming);
-            return Changed(table, rawId, rule.Conflict, rule.FullRow ? after : PushRowCodecHelper.Diff(before, after));
+            return Changed(table, rawId, rule.Conflict, rule.FullRow ? after : PushRowCodecHelper.Diff(before, after), saved);
         }
         finally
         {
@@ -433,14 +440,20 @@ public sealed partial class PushHandler(
         return false;
     }
 
-    private static SyncPushResult Accepted(string table, string id) => new(table, id, SyncPushStatusHelper.Accepted);
+    // Each result carries the server_seq of the server row it leaves (none when there is no server row): the
+    // phone's next baseSeq for that row.
 
-    private static SyncPushResult Changed(string table, string id, string conflict, JsonObject? row) =>
-        new(table, id, SyncPushStatusHelper.Changed, Conflict: conflict, Row: row);
+    private static SyncPushResult Accepted(string table, string id, object serverRow) =>
+        new(table, id, SyncPushStatusHelper.Accepted, ServerSeq: PushRowCodecHelper.ServerSeqOf(serverRow));
+
+    private static SyncPushResult Changed(string table, string id, string conflict, JsonObject? row, object? serverRow) =>
+        new(table, id, SyncPushStatusHelper.Changed, Conflict: conflict, Row: row,
+            ServerSeq: serverRow is null ? null : PushRowCodecHelper.ServerSeqOf(serverRow));
 
     /// <summary>A rejected row comes back with the server's version of it, empty when there is none.</summary>
     private static SyncPushResult Rejected(string table, string id, string reason, object? serverRow) =>
-        new(table, id, SyncPushStatusHelper.Rejected, Reason: reason, Row: serverRow is null ? [] : PushRowCodecHelper.Write(serverRow));
+        new(table, id, SyncPushStatusHelper.Rejected, Reason: reason, Row: serverRow is null ? [] : PushRowCodecHelper.Write(serverRow),
+            ServerSeq: serverRow is null ? null : PushRowCodecHelper.ServerSeqOf(serverRow));
 
     [LoggerMessage(LogLevel.Information,
         "Push batch {BatchId} by user {UserId}: {Accepted} accepted, {Changed} changed, {Rejected} rejected, {Alerts} low-stock alerts")]

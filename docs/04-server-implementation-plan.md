@@ -430,6 +430,7 @@ The build order deviates from the suggested one, on purpose. Everything not bloc
      1. Load the existing row (including soft-deleted ones).
      2. Classify the operations and check permissions. On failure: rejected `not-allowed` plus the server row.
      3. Validate. On failure: rejected `invalid` plus the server row. References must exist, deleted or not: a movement for a soft-deleted article is accepted, because stock truth wins.
+     3b. First change wins: an existing row (not a movement) whose `baseSeq` differs from its current `server_seq`, or has none, is rejected `conflict` plus the server row and its `serverSeq`.
      4. Apply the conflict rules. They mutate the row and add conflict codes; the status becomes `changed` with the changed fields in `row`.
      5. Movements: if the ID exists, compare content and return accepted, or `MOVEMENT_KEPT`. Otherwise set `created_by` and `device_id` from the token.
      6. `attribute_definition.key` is immutable: keep the server key (`ATTRIBUTE_KEY_KEPT`).

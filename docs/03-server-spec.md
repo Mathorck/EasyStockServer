@@ -185,23 +185,31 @@ Push request:
 {
   "batchId": "6b0e…",
   "rows": {
-    "category": [ { "id": "…", "name": "Hardware", "updatedAt": 1762859000000 } ],
+    "category": [ { "id": "…", "name": "Hardware", "updatedAt": 1762859000000, "baseSeq": 18290 } ],
     "stock_movement": [ { "id": "…", "articleId": "…", "locationId": "…", "quantity": -2000, "reason": "consumption", "occurredAt": 1762859000000, "createdAt": 1762859000000 } ]
   }
 }
 ```
+
+* `baseSeq` (push only): on a row that edits or soft-deletes a row the server already has, the `serverSeq` of the server version the phone edited.
+  The phone takes it from the row's `serverSeq` in the pull answer, or from the result's `serverSeq` after its own push.
+  It is left out on a new row (and ignored there).
 
 Push answer (one result per row):
 
 ```json
 {
   "results": [
-    { "table": "category", "id": "…", "status": "accepted" },
-    { "table": "article", "id": "…", "status": "changed", "conflict": "SKU_RENAMED", "row": { "sku": "BLT-8 (2)" } },
-    { "table": "category", "id": "…", "status": "rejected", "reason": "not-allowed", "row": { } }
+    { "table": "category", "id": "…", "status": "accepted", "serverSeq": 18342 },
+    { "table": "article", "id": "…", "status": "changed", "conflict": "SKU_RENAMED", "row": { "sku": "BLT-8 (2)" }, "serverSeq": 18343 },
+    { "table": "category", "id": "…", "status": "rejected", "reason": "not-allowed", "row": { }, "serverSeq": 18100 },
+    { "table": "article", "id": "…", "status": "rejected", "reason": "conflict", "row": { "id": "…", "name": "Bolt M8", "…": "…" }, "serverSeq": 18301 }
   ]
 }
 ```
+
+* `serverSeq`: the row's `server_seq` on the server after this push (for a rejected row, the server row's). Left out when the server has no such row.
+* `row` of a rejected result: the whole server row, or `{}` when there is none.
 
 Pull answer:
 
@@ -256,14 +264,22 @@ Pull answer:
 * A row that fails a check is rejected with a reason, and the server's current version of that row is returned if there is one.
 * A movement whose ID already exists is ignored and counted as accepted, since movements never change.
 * A movement row's `created_by` and `device_id` come from the token, whatever the phone sent.
-* Other rows use "last write wins" in the order the server receives them, not by the phone's `updated_at`.
+* Other rows: the first change wins (optimistic concurrency, checked under the push lock).
+  * An edit or soft delete of an existing row must carry `baseSeq` equal to the row's current `server_seq`.
+  * Otherwise (the row changed since the phone saw it, or no `baseSeq`) it is rejected with reason `conflict`, the whole server row and its `serverSeq`.
+  * The app shows the conflict (keep mine / keep theirs). "Keep mine" pushes the row again with `baseSeq` set to the returned `serverSeq`; "keep theirs" takes the returned row.
+  * The phone's `updated_at` plays no part. A row identical to the server's is accepted whatever its `baseSeq`.
+  * Permission, value and reference checks come first: a row that can never be applied gets their reason, not `conflict`.
+  * A new ID is never a conflict. A `baseSeq` that is not a whole number is `invalid`.
+  * `conflict` is also the reason of the rare database-level failure the checks missed.
 * `attribute_definition.key` cannot change once created: a different key for the same ID keeps the server's key (`ATTRIBUTE_KEY_KEPT`).
 * Only one open `stock_review` per location: a second one is rejected.
-* Every accepted or changed row gets a new `server_seq`.
+* Every accepted or changed row gets a new `server_seq`, returned as `serverSeq` in its result.
 
 ## Conflict rules
 
 * The rules are the same as the app's `BackupMerge`, ported to C#.
+* Except for the same row changed on both sides: push uses first change wins (see "Push processing"), not BackupMerge's newer `updatedAt`.
 * Category name already used: the incoming category gets " (2)", " (3)"… (`CATEGORY_RENAMED`).
 * SKU already used: the incoming article gets a suffix (`SKU_RENAMED`).
 * NFC tag already on another article or location: removed from the incoming row (`BARCODE_CLEARED`).
