@@ -27,6 +27,8 @@ public sealed partial class SchemaDriftTests(PostgresFixture pg)
         "setting",
         // Push registration
         "push_registration",
+        // Sync push and low-stock alerts
+        "sync_batch", "low_stock_state", "low_stock_alert",
     ];
 
     public static string FindAppFile(string relative)

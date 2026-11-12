@@ -49,6 +49,7 @@ public sealed class Program
         builder.Services.AddEasyStockForwardedHeaders();
         builder.Services.AddImages();
         builder.Services.AddSettings();
+        builder.Services.AddSyncPush();
 
         var app = builder.Build();
 
