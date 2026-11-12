@@ -1,3 +1,5 @@
+using EasyStock.Server.Helpers;
+
 namespace EasyStock.Server.Configuration;
 
 /// <summary>Rejects requests without acceptable X-EasyStock-App-Version and X-EasyStock-Schema-Version headers.</summary>
@@ -6,7 +8,7 @@ public sealed class VersionHeaderMiddleware(RequestDelegate next)
     public const string AppHeader = "X-EasyStock-App-Version";
     public const string SchemaHeader = "X-EasyStock-Schema-Version";
 
-    private static readonly Version MinApp = Version.Parse(Compat.MinAppVersion);
+    private static readonly Version MinApp = Version.Parse(CompatHelper.MinAppVersion);
 
     public Task InvokeAsync(HttpContext ctx) => IsExempt(ctx.Request) || IsAcceptable(ctx.Request) ? next(ctx) : Reject(ctx);
 
@@ -25,12 +27,12 @@ public sealed class VersionHeaderMiddleware(RequestDelegate next)
         // Ignore any pre-release or build suffix such as "1.2.3-beta".
         var core = app.Split('-', '+')[0];
         return Version.TryParse(core, out var v) && v >= MinApp
-            && int.TryParse(schema, out var s) && Compat.SupportedSchemaVersions.Contains(s);
+            && int.TryParse(schema, out var s) && CompatHelper.SupportedSchemaVersions.Contains(s);
     }
 
     private static Task Reject(HttpContext ctx) =>
         Results.Problem(
-            type: ProblemTypes.AppTooOld,
+            type: ProblemTypesHelper.AppTooOld,
             title: "App version not supported",
             detail: "Update the EasyStock app.",
             statusCode: StatusCodes.Status426UpgradeRequired).ExecuteAsync(ctx);

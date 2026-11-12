@@ -41,7 +41,7 @@ public sealed class AdminBackupController(
             case "merge": parsed = BackupImportMode.Merge; break;
             case "replace": parsed = BackupImportMode.Replace; break;
             default:
-                return ProblemTypes.Problem(StatusCodes.Status400BadRequest, ProblemTypes.ValidationFailed, detail: "mode must be 'merge' or 'replace'.");
+                return ProblemTypesHelper.Problem(StatusCodes.Status400BadRequest, ProblemTypesHelper.ValidationFailed, detail: "mode must be 'merge' or 'replace'.");
         }
 
         var tempDir = Path.Combine(options.Value.DataDir, "tmp");
@@ -80,15 +80,15 @@ public sealed class AdminBackupController(
 
     private static ObjectResult Refusal(BackupError error) => error switch
     {
-        BackupError.TooLarge => ProblemTypes.Problem(StatusCodes.Status413PayloadTooLarge, ProblemTypes.BackupTooLarge,
+        BackupError.TooLarge => ProblemTypesHelper.Problem(StatusCodes.Status413PayloadTooLarge, ProblemTypesHelper.BackupTooLarge,
             detail: "The backup is too large."),
-        BackupError.Encrypted => ProblemTypes.Problem(StatusCodes.Status422UnprocessableEntity, ProblemTypes.BackupEncrypted,
+        BackupError.Encrypted => ProblemTypesHelper.Problem(StatusCodes.Status422UnprocessableEntity, ProblemTypesHelper.BackupEncrypted,
             detail: "Encrypted backups cannot be imported by the server. Export an unencrypted backup from the app."),
-        BackupError.NewerVersion => ProblemTypes.Problem(StatusCodes.Status422UnprocessableEntity, ProblemTypes.BackupNewerVersion,
+        BackupError.NewerVersion => ProblemTypesHelper.Problem(StatusCodes.Status422UnprocessableEntity, ProblemTypesHelper.BackupNewerVersion,
             detail: "The backup comes from a newer version of EasyStock than this server understands."),
-        BackupError.NotABackup => ProblemTypes.Problem(StatusCodes.Status422UnprocessableEntity, ProblemTypes.NotABackup,
+        BackupError.NotABackup => ProblemTypesHelper.Problem(StatusCodes.Status422UnprocessableEntity, ProblemTypesHelper.NotABackup,
             detail: "The file is not an EasyStock backup."),
-        _ => ProblemTypes.Problem(StatusCodes.Status422UnprocessableEntity, ProblemTypes.BackupInvalid,
+        _ => ProblemTypesHelper.Problem(StatusCodes.Status422UnprocessableEntity, ProblemTypesHelper.BackupInvalid,
             detail: "The backup is damaged or inconsistent. Nothing was imported."),
     };
 }

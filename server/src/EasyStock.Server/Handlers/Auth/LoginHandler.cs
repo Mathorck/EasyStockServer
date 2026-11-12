@@ -28,7 +28,7 @@ public sealed partial class LoginHandler(
             _dummyHash ??= users.PasswordHasher.HashPassword(new AppUser(), "not-a-password-at-all");
             users.PasswordHasher.VerifyHashedPassword(new AppUser(), _dummyHash, request.Password);
             LogUnknown(log);
-            throw AccountsHelper.Unauthenticated(ProblemTypes.InvalidCredentials);
+            throw AccountsHelper.Unauthenticated(ProblemTypesHelper.InvalidCredentials);
         }
 
         var now = time.GetUtcNow();
@@ -44,11 +44,11 @@ public sealed partial class LoginHandler(
                 throw Locked(until - now);
             }
             LogFailed(log, user.Id);
-            throw AccountsHelper.Unauthenticated(ProblemTypes.InvalidCredentials);
+            throw AccountsHelper.Unauthenticated(ProblemTypesHelper.InvalidCredentials);
         }
 
         if (user.DisabledAt is not null || user.DeletedAt is not null)
-            throw AccountsHelper.Unauthenticated(ProblemTypes.AccountDisabled);
+            throw AccountsHelper.Unauthenticated(ProblemTypesHelper.AccountDisabled);
 
         if (user.AccessFailedCount != 0 || user.LockoutEnd is not null)
             await db.Users.Where(u => u.Id == user.Id).ExecuteUpdateAsync(s => s
@@ -76,7 +76,7 @@ public sealed partial class LoginHandler(
     }
 
     private static ProblemException Locked(TimeSpan wait) =>
-        new(StatusCodes.Status401Unauthorized, ProblemTypes.AccountLocked, retryAfter: wait);
+        new(StatusCodes.Status401Unauthorized, ProblemTypesHelper.AccountLocked, retryAfter: wait);
 
     [LoggerMessage(Level = LogLevel.Information, Message = "User {UserId} logged in")]
     private static partial void LogLoggedIn(ILogger log, Guid userId);

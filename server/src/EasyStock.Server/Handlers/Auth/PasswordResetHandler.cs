@@ -28,9 +28,9 @@ public sealed partial class PasswordResetHandler(
     public async Task<QrGrant> CreateAsync(Guid userId, Guid? createdBy, CancellationToken ct)
     {
         var user = await db.Users.AsNoTracking().SingleOrDefaultAsync(u => u.Id == userId && u.DeletedAt == null, ct)
-            ?? throw ProblemException.Of(StatusCodes.Status404NotFound, ProblemTypes.NotFound);
+            ?? throw ProblemException.Of(StatusCodes.Status404NotFound, ProblemTypesHelper.NotFound);
         if (user.Kind == UserKind.Guest)
-            throw ProblemException.Of(StatusCodes.Status409Conflict, ProblemTypes.UsePromotion);
+            throw ProblemException.Of(StatusCodes.Status409Conflict, ProblemTypesHelper.UsePromotion);
 
         var now = time.GetUtcNow();
         var token = SecretTokensHelper.New();
@@ -59,18 +59,18 @@ public sealed partial class PasswordResetHandler(
         var hash = SecretTokensHelper.Hash(request.ResetToken);
         await using var tx = await db.Database.BeginTransactionAsync(ct);
         var reset = await db.PasswordResets.AsNoTracking().SingleOrDefaultAsync(r => r.TokenHash == hash, ct)
-            ?? throw ProblemException.Of(StatusCodes.Status404NotFound, ProblemTypes.InviteInvalid);
-        if (reset.UsedAt is not null) throw Gone(ProblemTypes.ResetUsed);
-        if (reset.ExpiresAt <= now) throw Gone(ProblemTypes.ResetExpired);
+            ?? throw ProblemException.Of(StatusCodes.Status404NotFound, ProblemTypesHelper.InviteInvalid);
+        if (reset.UsedAt is not null) throw Gone(ProblemTypesHelper.ResetUsed);
+        if (reset.ExpiresAt <= now) throw Gone(ProblemTypesHelper.ResetExpired);
         var claimed = await db.PasswordResets.Where(r => r.Id == reset.Id && r.UsedAt == null)
             .ExecuteUpdateAsync(s => s.SetProperty(x => x.UsedAt, now), ct);
-        if (claimed == 0) throw Gone(ProblemTypes.ResetUsed);
+        if (claimed == 0) throw Gone(ProblemTypesHelper.ResetUsed);
 
         var user = await users.FindByIdAsync(reset.UserId.ToString());
         if (user is null || user.Kind != UserKind.Full)
-            throw ProblemException.Of(StatusCodes.Status404NotFound, ProblemTypes.InviteInvalid);
+            throw ProblemException.Of(StatusCodes.Status404NotFound, ProblemTypesHelper.InviteInvalid);
         if (user.DisabledAt is not null || user.DeletedAt is not null)
-            throw AccountsHelper.Unauthenticated(ProblemTypes.AccountDisabled);
+            throw AccountsHelper.Unauthenticated(ProblemTypesHelper.AccountDisabled);
 
         user.AccessFailedCount = 0;
         user.LockoutEnd = null;

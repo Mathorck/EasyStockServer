@@ -29,18 +29,18 @@ public sealed partial class PromotionHandler(
         Guid userId, Role targetRole, string typedShortCode, Guid? createdBy, CancellationToken ct)
     {
         if (targetRole is not (Role.Admin or Role.Member or Role.Viewer))
-            throw ProblemException.Of(StatusCodes.Status409Conflict, ProblemTypes.RoleNotAllowed);
+            throw ProblemException.Of(StatusCodes.Status409Conflict, ProblemTypesHelper.RoleNotAllowed);
 
         var now = time.GetUtcNow();
         await using var tx = await db.Database.BeginTransactionAsync(ct);
         // Row lock on the user: two promotions at once end up as one pending row.
         var user = (await db.Users.FromSql($"SELECT * FROM users WHERE id = {userId} FOR UPDATE").ToListAsync(ct))
             .SingleOrDefault(u => u.DeletedAt is null)
-            ?? throw ProblemException.Of(StatusCodes.Status404NotFound, ProblemTypes.NotFound);
+            ?? throw ProblemException.Of(StatusCodes.Status404NotFound, ProblemTypesHelper.NotFound);
         if (user.Kind != UserKind.Guest)
-            throw ProblemException.Of(StatusCodes.Status409Conflict, ProblemTypes.RoleNotAllowed);
+            throw ProblemException.Of(StatusCodes.Status409Conflict, ProblemTypesHelper.RoleNotAllowed);
         if (ShortCodeHelper.Normalize(typedShortCode) != user.ShortCode)
-            throw ProblemException.Of(StatusCodes.Status400BadRequest, ProblemTypes.ShortCodeMismatch);
+            throw ProblemException.Of(StatusCodes.Status400BadRequest, ProblemTypesHelper.ShortCodeMismatch);
 
         await EndPendingAsync(userId, Promotion.Cancelled, now, ct);
         var promotion = new Promotion
@@ -63,7 +63,7 @@ public sealed partial class PromotionHandler(
     public async Task CancelAsync(Guid userId, CancellationToken ct)
     {
         if (await EndPendingAsync(userId, Promotion.Cancelled, time.GetUtcNow(), ct) == 0)
-            throw ProblemException.Of(StatusCodes.Status404NotFound, ProblemTypes.NoPromotion);
+            throw ProblemException.Of(StatusCodes.Status404NotFound, ProblemTypesHelper.NoPromotion);
     }
 
     /// <summary>The pending, not expired promotion of the user, if any.</summary>
@@ -86,14 +86,14 @@ public sealed partial class PromotionHandler(
         var user = await users.FindByIdAsync(userId.ToString());
         var promotion = await db.Promotions.SingleOrDefaultAsync(p => p.UserId == userId && p.EndedAt == null, ct);
         if (user is null || user.Kind != UserKind.Guest || promotion is null)
-            throw ProblemException.Of(StatusCodes.Status404NotFound, ProblemTypes.NoPromotion);
+            throw ProblemException.Of(StatusCodes.Status404NotFound, ProblemTypesHelper.NoPromotion);
         if (promotion.ExpiresAt <= now)
         {
             promotion.EndedAt = now;
             promotion.EndReason = Promotion.Expired;
             await db.SaveChangesAsync(ct);
             await tx.CommitAsync(ct);
-            throw ProblemException.Of(StatusCodes.Status410Gone, ProblemTypes.PromotionExpired);
+            throw ProblemException.Of(StatusCodes.Status410Gone, ProblemTypesHelper.PromotionExpired);
         }
 
         user.Kind = UserKind.Full;

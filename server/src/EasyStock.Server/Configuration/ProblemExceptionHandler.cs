@@ -1,3 +1,4 @@
+using EasyStock.Server.Helpers;
 using Microsoft.AspNetCore.Diagnostics;
 
 namespace EasyStock.Server.Configuration;
@@ -23,7 +24,7 @@ public sealed class ProblemExceptionHandler : IExceptionHandler
             }
             result = Results.Problem(
                 type: p.Type,
-                title: ProblemTypes.DefaultTitle(p.Type),
+                title: ProblemTypesHelper.DefaultTitle(p.Type),
                 detail: p.Detail,
                 statusCode: p.Status,
                 extensions: extensions);
@@ -31,8 +32,8 @@ public sealed class ProblemExceptionHandler : IExceptionHandler
         else
         {
             result = Results.Problem(
-                type: ProblemTypes.InternalError,
-                title: ProblemTypes.DefaultTitle(ProblemTypes.InternalError),
+                type: ProblemTypesHelper.InternalError,
+                title: ProblemTypesHelper.DefaultTitle(ProblemTypesHelper.InternalError),
                 statusCode: StatusCodes.Status500InternalServerError);
         }
         await result.ExecuteAsync(ctx);

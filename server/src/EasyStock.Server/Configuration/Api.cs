@@ -1,3 +1,4 @@
+using EasyStock.Server.Helpers;
 using System.Text.Json;
 using System.Text.Json.Serialization;
 using Microsoft.AspNetCore.Mvc;
@@ -18,11 +19,11 @@ public static class Api
         {
             var problem = new ValidationProblemDetails(ctx.ModelState)
             {
-                Type = ProblemTypes.ValidationFailed,
-                Title = ProblemTypes.DefaultTitle(ProblemTypes.ValidationFailed),
+                Type = ProblemTypesHelper.ValidationFailed,
+                Title = ProblemTypesHelper.DefaultTitle(ProblemTypesHelper.ValidationFailed),
                 Status = StatusCodes.Status400BadRequest,
             };
-            return new BadRequestObjectResult(problem) { ContentTypes = { ProblemTypes.ContentType } };
+            return new BadRequestObjectResult(problem) { ContentTypes = { ProblemTypesHelper.ContentType } };
         });
         return services;
     }

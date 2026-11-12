@@ -1,4 +1,4 @@
-using EasyStock.Server.Configuration;
+using EasyStock.Server.Helpers;
 using EasyStock.Server.DB;
 using EasyStock.Server.Handlers.Auth;
 using EasyStock.Server.Handlers.Sync;
@@ -15,10 +15,10 @@ public sealed class ServerInfoHandler(EasyStockDbContext db, SetupHandler setup,
 {
     public async Task<Models.ServerInfo> GetAsync(CancellationToken ct) => new(
         ServerName: "EasyStock",
-        ServerVersion: Compat.ServerVersion,
-        ApiVersion: Compat.ApiVersion,
-        MinAppVersion: Compat.MinAppVersion,
-        SupportedSchemaVersions: Compat.SupportedSchemaVersions,
+        ServerVersion: CompatHelper.ServerVersion,
+        ApiVersion: CompatHelper.ApiVersion,
+        MinAppVersion: CompatHelper.MinAppVersion,
+        SupportedSchemaVersions: CompatHelper.SupportedSchemaVersions,
         SetupDone: await setup.IsDoneAsync(ct),
         HasData: await HasDataAsync(ct),
         GuestSignupEnabled: await GuestSignupWorksAsync(ct),

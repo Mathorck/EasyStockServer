@@ -1,6 +1,5 @@
 using EasyStock.Server.Filters;
 using EasyStock.Server.Interfaces;
-using EasyStock.Server.Configuration;
 using EasyStock.Server.DB;
 using EasyStock.Server.DB.Entities;
 using EasyStock.Server.Enums;
@@ -64,25 +63,25 @@ public sealed class ImagesController(EasyStockDbContext db, ImageHandler store, 
         sha256 = sha256.ToLowerInvariant();
         if (!string.Equals(MediaTypeHeaderValue.TryParse(Request.ContentType, out var mt) ? mt.MediaType.Value : null,
                 "image/jpeg", StringComparison.OrdinalIgnoreCase))
-            return ProblemTypes.Problem(StatusCodes.Status415UnsupportedMediaType, ProblemTypes.UnsupportedMediaType);
+            return ProblemTypesHelper.Problem(StatusCodes.Status415UnsupportedMediaType, ProblemTypesHelper.UnsupportedMediaType);
         if (Request.ContentLength > ImageHandler.MaxBytes)
-            return ProblemTypes.Problem(StatusCodes.Status413PayloadTooLarge, ProblemTypes.ImageTooLarge);
+            return ProblemTypesHelper.Problem(StatusCodes.Status413PayloadTooLarge, ProblemTypesHelper.ImageTooLarge);
 
         ImageSaveResult result;
         try { result = await store.SaveAsync(sha256, Request.Body, ct); }
         catch (BadHttpRequestException e) when (e.StatusCode == StatusCodes.Status413PayloadTooLarge)
         {
-            return ProblemTypes.Problem(StatusCodes.Status413PayloadTooLarge, ProblemTypes.ImageTooLarge);
+            return ProblemTypesHelper.Problem(StatusCodes.Status413PayloadTooLarge, ProblemTypesHelper.ImageTooLarge);
         }
 
         switch (result.Status)
         {
             case ImageSaveStatus.TooLarge:
-                return ProblemTypes.Problem(StatusCodes.Status413PayloadTooLarge, ProblemTypes.ImageTooLarge);
+                return ProblemTypesHelper.Problem(StatusCodes.Status413PayloadTooLarge, ProblemTypesHelper.ImageTooLarge);
             case ImageSaveStatus.NotJpeg:
-                return ProblemTypes.Problem(StatusCodes.Status400BadRequest, ProblemTypes.NotJpeg);
+                return ProblemTypesHelper.Problem(StatusCodes.Status400BadRequest, ProblemTypesHelper.NotJpeg);
             case ImageSaveStatus.HashMismatch:
-                return ProblemTypes.Problem(StatusCodes.Status400BadRequest, ProblemTypes.HashMismatch);
+                return ProblemTypesHelper.Problem(StatusCodes.Status400BadRequest, ProblemTypesHelper.HashMismatch);
         }
 
         var inserted = await db.Database.ExecuteSqlInterpolatedAsync(

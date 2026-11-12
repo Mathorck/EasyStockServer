@@ -63,12 +63,12 @@ public sealed partial class AdminUsersHandler(
         if (role is { } newRole && newRole != user.Role)
         {
             if (user.Kind == UserKind.Guest || newRole == Role.Guest)
-                throw ProblemException.Of(StatusCodes.Status409Conflict, ProblemTypes.RoleNotAllowed);
+                throw ProblemException.Of(StatusCodes.Status409Conflict, ProblemTypesHelper.RoleNotAllowed);
             if (IsActiveAdmin(user)) await EnsureAnotherAdminAsync(id, ct);
             user.Role = newRole;
         }
         else if (role == Role.Guest && user.Kind != UserKind.Guest)
-            throw ProblemException.Of(StatusCodes.Status409Conflict, ProblemTypes.RoleNotAllowed);
+            throw ProblemException.Of(StatusCodes.Status409Conflict, ProblemTypesHelper.RoleNotAllowed);
 
         if (displayName is not null) user.DisplayName = displayName;
 
@@ -120,7 +120,7 @@ public sealed partial class AdminUsersHandler(
 
     private async Task<AppUser> FindAsync(Guid id, CancellationToken ct) =>
         await db.Users.SingleOrDefaultAsync(u => u.Id == id && u.DeletedAt == null, ct)
-        ?? throw ProblemException.Of(StatusCodes.Status404NotFound, ProblemTypes.NotFound);
+        ?? throw ProblemException.Of(StatusCodes.Status404NotFound, ProblemTypesHelper.NotFound);
 
     private static bool IsActiveAdmin(AppUser u) =>
         u.Role == Role.Admin && u.Kind == UserKind.Full && u.DisabledAt is null && u.DeletedAt is null;
@@ -129,7 +129,7 @@ public sealed partial class AdminUsersHandler(
     {
         var others = await db.Users.AnyAsync(u => u.Id != id && u.Role == Role.Admin && u.Kind == UserKind.Full
             && u.DisabledAt == null && u.DeletedAt == null, ct);
-        if (!others) throw ProblemException.Of(StatusCodes.Status409Conflict, ProblemTypes.LastAdmin);
+        if (!others) throw ProblemException.Of(StatusCodes.Status409Conflict, ProblemTypesHelper.LastAdmin);
     }
 
     [LoggerMessage(Level = LogLevel.Information, Message = "Admin changed user {UserId}")]

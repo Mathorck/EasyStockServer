@@ -66,11 +66,11 @@ internal static class AccountsHelper
     {
         if (result.Succeeded) return;
         if (result.Errors.Any(e => e.Code == UsernameValidatorHandler.DuplicateCode))
-            throw ProblemException.Of(StatusCodes.Status409Conflict, ProblemTypes.UsernameTaken);
+            throw ProblemException.Of(StatusCodes.Status409Conflict, ProblemTypesHelper.UsernameTaken);
         var errors = result.Errors
             .GroupBy(e => e.Code.StartsWith("Password", StringComparison.Ordinal) ? "password" : "username")
             .ToDictionary(g => g.Key, g => g.Select(e => e.Description).ToArray());
-        throw new ProblemException(StatusCodes.Status400BadRequest, ProblemTypes.ValidationFailed,
+        throw new ProblemException(StatusCodes.Status400BadRequest, ProblemTypesHelper.ValidationFailed,
             extensions: new Dictionary<string, object?> { ["errors"] = errors });
     }
 

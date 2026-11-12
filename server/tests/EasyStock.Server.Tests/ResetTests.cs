@@ -72,6 +72,6 @@ public sealed class ResetTests(PostgresFixture pg) : IDisposable
     {
         await (await Redeem(SecretTokensHelper.New())).Problem(HttpStatusCode.NotFound, "invite-invalid");
         var ex = await Assert.ThrowsAsync<ProblemException>(() => CreateReset(Guid.NewGuid()));
-        Assert.Equal(ProblemTypes.NotFound, ex.Type);
+        Assert.Equal(ProblemTypesHelper.NotFound, ex.Type);
     }
 }

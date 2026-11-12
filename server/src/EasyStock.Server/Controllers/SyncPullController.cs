@@ -1,6 +1,6 @@
+using EasyStock.Server.Helpers;
 using EasyStock.Server.Filters;
 using EasyStock.Server.Interfaces;
-using EasyStock.Server.Configuration;
 using EasyStock.Server.Enums;
 using EasyStock.Server.Models;
 using EasyStock.Server.Handlers.Sync;
@@ -36,7 +36,7 @@ public sealed class SyncPullController(PullHandler builder, DatasetEpochHandler 
             return new ObjectResult(new ValidationProblemDetails(errors)
             {
                 Status = StatusCodes.Status400BadRequest,
-                Type = ProblemTypes.ValidationFailed,
+                Type = ProblemTypesHelper.ValidationFailed,
                 Title = "Invalid query",
             })
             {
@@ -48,7 +48,7 @@ public sealed class SyncPullController(PullHandler builder, DatasetEpochHandler 
         // with the old epoch store the new one next to its stale rows.
         var epoch = await epochs.GetAsync(ct);
         if (!DatasetEpochHandler.Accepts(datasetEpoch, epoch))
-            return ProblemTypes.DatasetResetProblem(epoch);
+            return ProblemTypesHelper.DatasetResetProblem(epoch);
         return Ok(await builder.BuildAsync(user, since, limit, epoch, ct));
     }
 }

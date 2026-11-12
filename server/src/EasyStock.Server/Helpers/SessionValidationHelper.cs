@@ -1,4 +1,3 @@
-using EasyStock.Server.Configuration;
 using EasyStock.Server.DB;
 using EasyStock.Server.Enums;
 using EasyStock.Server.Handlers.Auth;
@@ -23,7 +22,7 @@ public static class SessionValidationHelper
         OnAuthenticationFailed = ctx =>
         {
             AuthFailureHelper.Record(ctx.HttpContext,
-                ctx.Exception is SecurityTokenExpiredException ? ProblemTypes.TokenExpired : ProblemTypes.Unauthorized);
+                ctx.Exception is SecurityTokenExpiredException ? ProblemTypesHelper.TokenExpired : ProblemTypesHelper.Unauthorized);
             return Task.CompletedTask;
         },
         OnChallenge = async ctx =>
@@ -31,7 +30,7 @@ public static class SessionValidationHelper
             ctx.HandleResponse();
             await AuthFailureHelper.Unauthenticated(ctx.HttpContext).ExecuteResultAsync(new() { HttpContext = ctx.HttpContext });
         },
-        OnForbidden = ctx => ProblemTypes.Problem(StatusCodes.Status403Forbidden, ProblemTypes.NotAllowed)
+        OnForbidden = ctx => ProblemTypesHelper.Problem(StatusCodes.Status403Forbidden, ProblemTypesHelper.NotAllowed)
             .ExecuteResultAsync(new() { HttpContext = ctx.HttpContext }),
     };
 
@@ -41,7 +40,7 @@ public static class SessionValidationHelper
         if (!Guid.TryParse(principal?.FindFirst(JwtRegisteredClaimNames.Sub)?.Value, out var userId)
             || !Guid.TryParse(principal?.FindFirst(AccessTokenHandler.SessionClaim)?.Value, out var sessionId))
         {
-            Fail(ctx, ProblemTypes.Unauthorized);
+            Fail(ctx, ProblemTypesHelper.Unauthorized);
             return;
         }
 
@@ -64,12 +63,12 @@ public static class SessionValidationHelper
 
         if (row is null || row.RevokedAt is not null)
         {
-            Fail(ctx, ProblemTypes.SessionRevoked);
+            Fail(ctx, ProblemTypesHelper.SessionRevoked);
             return;
         }
         if (row.DisabledAt is not null || row.DeletedAt is not null)
         {
-            Fail(ctx, ProblemTypes.AccountDisabled);
+            Fail(ctx, ProblemTypesHelper.AccountDisabled);
             return;
         }
 

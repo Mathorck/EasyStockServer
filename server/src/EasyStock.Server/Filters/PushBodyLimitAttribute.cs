@@ -1,4 +1,4 @@
-using EasyStock.Server.Configuration;
+using EasyStock.Server.Helpers;
 using EasyStock.Server.Handlers.Sync;
 using Microsoft.AspNetCore.Mvc.Filters;
 
@@ -14,7 +14,7 @@ public sealed class PushBodyLimitAttribute : Attribute, IResourceFilter
     public void OnResourceExecuting(ResourceExecutingContext context)
     {
         if (context.HttpContext.Request.ContentLength > PushHandler.MaxBodyBytes)
-            context.Result = ProblemTypes.Problem(StatusCodes.Status413PayloadTooLarge, ProblemTypes.BatchTooLarge,
+            context.Result = ProblemTypesHelper.Problem(StatusCodes.Status413PayloadTooLarge, ProblemTypesHelper.BatchTooLarge,
                 detail: $"At most {PushHandler.MaxBodyBytes} bytes per batch.");
     }
 

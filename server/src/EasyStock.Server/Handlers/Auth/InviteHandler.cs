@@ -24,7 +24,7 @@ public sealed partial class InviteHandler(
     public async Task<InviteAnswer> CreateAsync(Role role, Guid? createdBy, CancellationToken ct)
     {
         if (!IsInvitableRole(role))
-            throw ProblemException.Of(StatusCodes.Status409Conflict, ProblemTypes.RoleNotAllowed);
+            throw ProblemException.Of(StatusCodes.Status409Conflict, ProblemTypesHelper.RoleNotAllowed);
         var now = time.GetUtcNow();
         var token = SecretTokensHelper.New();
         var invite = new Invite
@@ -57,7 +57,7 @@ public sealed partial class InviteHandler(
     public async Task CancelAsync(Guid inviteId, CancellationToken ct)
     {
         var n = await db.Invites.Where(i => i.Id == inviteId && i.UsedAt == null).ExecuteDeleteAsync(ct);
-        if (n == 0) throw ProblemException.Of(StatusCodes.Status404NotFound, ProblemTypes.NotFound);
+        if (n == 0) throw ProblemException.Of(StatusCodes.Status404NotFound, ProblemTypesHelper.NotFound);
     }
 
     /// <summary><c>POST /auth/invite/redeem</c>.</summary>
@@ -67,14 +67,14 @@ public sealed partial class InviteHandler(
         var hash = SecretTokensHelper.Hash(request.InviteToken);
         await using var tx = await db.Database.BeginTransactionAsync(ct);
         var invite = await db.Invites.AsNoTracking().SingleOrDefaultAsync(i => i.TokenHash == hash, ct)
-            ?? throw ProblemException.Of(StatusCodes.Status404NotFound, ProblemTypes.InviteInvalid);
-        if (invite.UsedAt is not null) throw Gone(ProblemTypes.InviteUsed);
-        if (invite.ExpiresAt <= now) throw Gone(ProblemTypes.InviteExpired);
+            ?? throw ProblemException.Of(StatusCodes.Status404NotFound, ProblemTypesHelper.InviteInvalid);
+        if (invite.UsedAt is not null) throw Gone(ProblemTypesHelper.InviteUsed);
+        if (invite.ExpiresAt <= now) throw Gone(ProblemTypesHelper.InviteExpired);
 
         // Conditional update: of two redeems at once, only one gets the row.
         var claimed = await db.Invites.Where(i => i.Id == invite.Id && i.UsedAt == null)
             .ExecuteUpdateAsync(s => s.SetProperty(x => x.UsedAt, now), ct);
-        if (claimed == 0) throw Gone(ProblemTypes.InviteUsed);
+        if (claimed == 0) throw Gone(ProblemTypesHelper.InviteUsed);
 
         var user = await AccountsHelper.NewUserAsync(db, time, request.DisplayName, invite.Role, UserKind.Full, ct);
         user.UserName = request.Username;

@@ -1,5 +1,5 @@
+using EasyStock.Server.Helpers;
 using EasyStock.Server.Filters;
-using EasyStock.Server.Configuration;
 using EasyStock.Server.DB;
 using EasyStock.Server.DB.Entities;
 using EasyStock.Server.Interfaces;
@@ -24,7 +24,7 @@ public sealed class PushController(EasyStockDbContext db, ICurrentUser currentUs
     {
         var endpoint = request?.Endpoint;
         if (!IsAcceptableEndpoint(endpoint))
-            return ProblemTypes.Problem(StatusCodes.Status400BadRequest, ProblemTypes.ValidationFailed,
+            return ProblemTypesHelper.Problem(StatusCodes.Status400BadRequest, ProblemTypesHelper.ValidationFailed,
                 "Invalid push endpoint",
                 $"The endpoint must be an absolute http or https URL of at most {MaxEndpointLength} characters.");
 

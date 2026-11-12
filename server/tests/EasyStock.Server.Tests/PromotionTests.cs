@@ -35,7 +35,7 @@ public sealed class PromotionTests(PostgresFixture pg)
         using var _ = factory;
 
         var mismatch = await Assert.ThrowsAsync<ProblemException>(() => Promote(factory, guest.User.Id, Role.Member, "AAA-AAA"));
-        Assert.Equal(ProblemTypes.ShortCodeMismatch, mismatch.Type);
+        Assert.Equal(ProblemTypesHelper.ShortCodeMismatch, mismatch.Type);
 
         // Typed by an Admin: case and dash do not matter.
         await Promote(factory, guest.User.Id, Role.Member, guest.User.ShortCode.Replace("-", "").ToLowerInvariant());
@@ -96,7 +96,7 @@ public sealed class PromotionTests(PostgresFixture pg)
 
         var ex = await Assert.ThrowsAsync<ProblemException>(() =>
             factory.WithService<bool, PromotionHandler>(async s => { await s.CancelAsync(guest.User.Id, Ct); return true; }));
-        Assert.Equal(ProblemTypes.NoPromotion, ex.Type);
+        Assert.Equal(ProblemTypesHelper.NoPromotion, ex.Type);
     }
 
     [Fact]
@@ -106,11 +106,11 @@ public sealed class PromotionTests(PostgresFixture pg)
         using var _ = factory;
         var full = await factory.CreateUserAsync(Role.Viewer);
 
-        Assert.Equal(ProblemTypes.RoleNotAllowed,
+        Assert.Equal(ProblemTypesHelper.RoleNotAllowed,
             (await Assert.ThrowsAsync<ProblemException>(() => Promote(factory, full.Id, Role.Member, full.Tokens.User.ShortCode))).Type);
-        Assert.Equal(ProblemTypes.RoleNotAllowed,
+        Assert.Equal(ProblemTypesHelper.RoleNotAllowed,
             (await Assert.ThrowsAsync<ProblemException>(() => Promote(factory, guest.User.Id, Role.Guest, guest.User.ShortCode))).Type);
-        Assert.Equal(ProblemTypes.UsePromotion,
+        Assert.Equal(ProblemTypesHelper.UsePromotion,
             (await Assert.ThrowsAsync<ProblemException>(() =>
                 factory.WithService<QrGrant, PasswordResetHandler>(s => s.CreateAsync(guest.User.Id, null, Ct)))).Type);
     }

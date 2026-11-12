@@ -58,18 +58,18 @@ public sealed partial class PublicInviteHandler(
     {
         var row = await db.PublicInvites.AsNoTracking().SingleOrDefaultAsync(ct);
         if (row is not { Enabled: true })
-            throw ProblemException.Of(StatusCodes.Status403Forbidden, ProblemTypes.GuestSignupOff);
+            throw ProblemException.Of(StatusCodes.Status403Forbidden, ProblemTypesHelper.GuestSignupOff);
         if (!SecretTokensHelper.Matches(request.PublicToken, row.TokenHash))
-            throw ProblemException.Of(StatusCodes.Status404NotFound, ProblemTypes.InviteInvalid);
+            throw ProblemException.Of(StatusCodes.Status404NotFound, ProblemTypesHelper.InviteInvalid);
         var displayName = AccountsHelper.CleanDisplayName(request.DisplayName);
         AccountsHelper.CleanDeviceName(request.DeviceName);
 
         await using var tx = await db.Database.BeginTransactionAsync(ct);
         await db.LockAsync(AuthLimitsHelper.GuestSignupLockKey, ct);
         if (row.GuestLimit is { } limit && await CountGuestsAsync(ct) >= limit)
-            throw ProblemException.Of(StatusCodes.Status409Conflict, ProblemTypes.GuestLimitReached);
+            throw ProblemException.Of(StatusCodes.Status409Conflict, ProblemTypesHelper.GuestLimitReached);
         if (!counter.CanSignUp(ipKey, out var retryAfter))
-            throw new ProblemException(StatusCodes.Status429TooManyRequests, ProblemTypes.RateLimited, retryAfter: retryAfter);
+            throw new ProblemException(StatusCodes.Status429TooManyRequests, ProblemTypesHelper.RateLimited, retryAfter: retryAfter);
 
         // Always role guest, kind guest. No username, no password, no lockout.
         var user = await AccountsHelper.NewUserAsync(db, time, displayName, Role.Guest, UserKind.Guest, ct);

@@ -1,4 +1,4 @@
-using EasyStock.Server.Configuration;
+using EasyStock.Server.Helpers;
 using EasyStock.Server.Handlers.Sync;
 using Microsoft.AspNetCore.Mvc.Filters;
 
@@ -20,7 +20,7 @@ public sealed class DatasetEpochCheckAttribute : Attribute, IAsyncResourceFilter
             var current = await http.RequestServices.GetRequiredService<DatasetEpochHandler>().GetAsync(http.RequestAborted);
             if (!DatasetEpochHandler.Accepts(header, current))
             {
-                context.Result = ProblemTypes.DatasetResetProblem(current);
+                context.Result = ProblemTypesHelper.DatasetResetProblem(current);
                 return;
             }
         }

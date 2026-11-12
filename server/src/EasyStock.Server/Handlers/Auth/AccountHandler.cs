@@ -35,7 +35,7 @@ public sealed partial class AccountHandler(
         if (request.HasAlertsEnabled)
         {
             if (user.Kind == UserKind.Guest)
-                throw ProblemException.Of(StatusCodes.Status403Forbidden, ProblemTypes.NotAllowed);
+                throw ProblemException.Of(StatusCodes.Status403Forbidden, ProblemTypesHelper.NotAllowed);
             user.AlertsEnabled = request.AlertsEnabled;
         }
         await db.SaveChangesAsync(ct);
@@ -49,14 +49,14 @@ public sealed partial class AccountHandler(
     public async Task ChangePasswordAsync(Guid userId, Guid sessionId, ChangePasswordRequest request, CancellationToken ct)
     {
         var user = await users.FindByIdAsync(userId.ToString())
-            ?? throw AccountsHelper.Unauthenticated(ProblemTypes.SessionRevoked);
+            ?? throw AccountsHelper.Unauthenticated(ProblemTypesHelper.SessionRevoked);
         if (user.Kind != UserKind.Full)
-            throw ProblemException.Of(StatusCodes.Status403Forbidden, ProblemTypes.NotAllowed);
+            throw ProblemException.Of(StatusCodes.Status403Forbidden, ProblemTypesHelper.NotAllowed);
 
         await using var tx = await db.Database.BeginTransactionAsync(ct);
         var result = await users.ChangePasswordAsync(user, request.CurrentPassword, request.NewPassword);
         if (result.Errors.Any(e => e.Code == nameof(IdentityErrorDescriber.PasswordMismatch)))
-            throw ProblemException.Of(StatusCodes.Status400BadRequest, ProblemTypes.InvalidCredentials);
+            throw ProblemException.Of(StatusCodes.Status400BadRequest, ProblemTypesHelper.InvalidCredentials);
         AccountsHelper.ThrowIfFailed(result);
         await sessions.RevokeAllAsync(userId, AuthLimitsHelper.RevokeReasons.PasswordChanged, keep: sessionId, ct);
         await tx.CommitAsync(ct);

@@ -1,12 +1,12 @@
 using Microsoft.AspNetCore.Mvc;
 
-namespace EasyStock.Server.Configuration;
+namespace EasyStock.Server.Helpers;
 
 /// <summary>
 /// Problem Details <c>type</c> values (docs/04-server-implementation-plan.md, 3.6). They are bare slugs, the same
 /// strings the app matches on; the HTTP status that goes with each one is listed in the plan.
 /// </summary>
-public static class ProblemTypes
+public static class ProblemTypesHelper
 {
     public const string ValidationFailed = "validation-failed";        // 400
     public const string ShortCodeMismatch = "short-code-mismatch";     // 400

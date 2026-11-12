@@ -59,9 +59,9 @@ public sealed partial class SetupHandler(
         await db.LockAsync(AuthLimitsHelper.SetupLockKey, ct);
         var state = await db.SetupStates.SingleOrDefaultAsync(s => s.Id == SetupState.SingletonId, ct);
         if (state is null || state.Done || await db.Users.AnyAsync(ct))
-            throw ProblemException.Of(StatusCodes.Status409Conflict, ProblemTypes.SetupDone);
+            throw ProblemException.Of(StatusCodes.Status409Conflict, ProblemTypesHelper.SetupDone);
         if (!SecretTokensHelper.Matches(request.SetupToken, state.TokenHash))
-            throw ProblemException.Of(StatusCodes.Status404NotFound, ProblemTypes.InviteInvalid);
+            throw ProblemException.Of(StatusCodes.Status404NotFound, ProblemTypesHelper.InviteInvalid);
 
         var user = await AccountsHelper.NewUserAsync(db, time, request.DisplayName, Role.Admin, UserKind.Full, ct);
         user.UserName = request.Username;

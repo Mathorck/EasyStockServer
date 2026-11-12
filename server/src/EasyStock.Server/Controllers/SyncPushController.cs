@@ -1,6 +1,5 @@
 using System.Text.Json.Nodes;
 using EasyStock.Server.Filters;
-using EasyStock.Server.Configuration;
 using EasyStock.Server.Enums;
 using EasyStock.Server.Models;
 using EasyStock.Server.Helpers;
@@ -34,18 +33,18 @@ public sealed class SyncPushController(PushHandler processor) : ControllerBase
         CancellationToken ct)
     {
         if (!Guid.TryParse(request.BatchId, out var batchId) || request.Rows is null)
-            return ProblemTypes.Problem(StatusCodes.Status400BadRequest, ProblemTypes.ValidationFailed,
+            return ProblemTypesHelper.Problem(StatusCodes.Status400BadRequest, ProblemTypesHelper.ValidationFailed,
                 detail: "batchId must be a UUID and rows an object of row lists by table.");
         if (request.Rows.Values.Sum(rows => rows?.Count ?? 0) > PushHandler.MaxRows)
-            return ProblemTypes.Problem(StatusCodes.Status413PayloadTooLarge, ProblemTypes.BatchTooLarge,
+            return ProblemTypesHelper.Problem(StatusCodes.Status413PayloadTooLarge, ProblemTypesHelper.BatchTooLarge,
                 detail: $"At most {PushHandler.MaxRows} rows per batch.");
 
         var rows = request.Rows.ToDictionary(t => t.Key, t => t.Value ?? new List<JsonNode?>());
         var outcome = await processor.PushAsync(batchId, rows, datasetEpoch, ct);
         if (outcome.ResetEpoch is { } epoch)
-            return ProblemTypes.DatasetResetProblem(epoch);
+            return ProblemTypesHelper.DatasetResetProblem(epoch);
         if (outcome.BatchIdReused)
-            return ProblemTypes.Problem(StatusCodes.Status409Conflict, ProblemTypes.BatchIdReused);
+            return ProblemTypesHelper.Problem(StatusCodes.Status409Conflict, ProblemTypesHelper.BatchIdReused);
         // The saved bytes, so a replayed batch gets exactly the first answer.
         return Content(outcome.Json!, "application/json");
     }

@@ -1,3 +1,4 @@
+using EasyStock.Server.Helpers;
 using System.Globalization;
 using System.Net.Sockets;
 using System.Net;
@@ -26,8 +27,8 @@ public static class RateLimiting
                 var seconds = ProblemException.Seconds(wait);
                 ctx.HttpContext.Response.Headers.RetryAfter = seconds.ToString(CultureInfo.InvariantCulture);
                 return new ValueTask(Results.Problem(
-                    type: ProblemTypes.RateLimited,
-                    title: ProblemTypes.DefaultTitle(ProblemTypes.RateLimited),
+                    type: ProblemTypesHelper.RateLimited,
+                    title: ProblemTypesHelper.DefaultTitle(ProblemTypesHelper.RateLimited),
                     statusCode: StatusCodes.Status429TooManyRequests,
                     extensions: new Dictionary<string, object?> { ["retryAfter"] = seconds }).ExecuteAsync(ctx.HttpContext));
             };

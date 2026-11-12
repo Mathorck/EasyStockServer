@@ -16,15 +16,15 @@ namespace EasyStock.Server.Controllers;
 [ApiController]
 [Route("api/v1/admin/invites")]
 [RequirePermission(Permission.Administer)]
-[ProducesResponseType<ProblemDetails>(StatusCodes.Status400BadRequest, ProblemTypes.ContentType)]
-[ProducesResponseType<ProblemDetails>(StatusCodes.Status401Unauthorized, ProblemTypes.ContentType)]
-[ProducesResponseType<ProblemDetails>(StatusCodes.Status403Forbidden, ProblemTypes.ContentType)]
+[ProducesResponseType<ProblemDetails>(StatusCodes.Status400BadRequest, ProblemTypesHelper.ContentType)]
+[ProducesResponseType<ProblemDetails>(StatusCodes.Status401Unauthorized, ProblemTypesHelper.ContentType)]
+[ProducesResponseType<ProblemDetails>(StatusCodes.Status403Forbidden, ProblemTypesHelper.ContentType)]
 public sealed class AdminInvitesController(ICurrentUser current, InviteHandler invites) : ControllerBase
 {
     /// <summary>Creates an invite (7 days, single use). The answer carries the <c>qr</c> content with the token.</summary>
     [HttpPost]
     [ProducesResponseType<InviteAnswer>(StatusCodes.Status200OK)]
-    [ProducesResponseType<ProblemDetails>(StatusCodes.Status409Conflict, ProblemTypes.ContentType)]
+    [ProducesResponseType<ProblemDetails>(StatusCodes.Status409Conflict, ProblemTypesHelper.ContentType)]
     public Task<InviteAnswer> Create(CreateInviteRequest request, CancellationToken ct) =>
         invites.CreateAsync(ParseInvitableRole(request.Role), current.UserId, ct);
 
@@ -36,7 +36,7 @@ public sealed class AdminInvitesController(ICurrentUser current, InviteHandler i
     /// <summary>Cancels an unused invite. 404 not-found if it is unknown, already used or cancelled.</summary>
     [HttpDelete("{id:guid}")]
     [ProducesResponseType(StatusCodes.Status204NoContent)]
-    [ProducesResponseType<ProblemDetails>(StatusCodes.Status404NotFound, ProblemTypes.ContentType)]
+    [ProducesResponseType<ProblemDetails>(StatusCodes.Status404NotFound, ProblemTypesHelper.ContentType)]
     public async Task<NoContentResult> Cancel(Guid id, CancellationToken ct)
     {
         await invites.CancelAsync(id, ct);

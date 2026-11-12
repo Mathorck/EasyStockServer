@@ -62,7 +62,7 @@ public sealed class InviteTests(PostgresFixture pg) : IDisposable
 
         var missing = await Assert.ThrowsAsync<ProblemException>(() =>
             _factory.WithService<bool, InviteHandler>(async s => { await s.CancelAsync(invite.Id, Ct); return true; }));
-        Assert.Equal(ProblemTypes.NotFound, missing.Type);
+        Assert.Equal(ProblemTypesHelper.NotFound, missing.Type);
     }
 
     [Fact]
@@ -84,6 +84,6 @@ public sealed class InviteTests(PostgresFixture pg) : IDisposable
     public async Task Guest_invites_do_not_exist()
     {
         var ex = await Assert.ThrowsAsync<ProblemException>(() => _factory.CreateInviteAsync(Role.Guest));
-        Assert.Equal(ProblemTypes.RoleNotAllowed, ex.Type);
+        Assert.Equal(ProblemTypesHelper.RoleNotAllowed, ex.Type);
     }
 }

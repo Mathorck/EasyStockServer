@@ -74,7 +74,7 @@ public sealed class BackupExportHandler(
             ["images"] = available.Count,
         };
         var manifest = new BackupManifest(
-            BackupFormatHelper.Format, BackupFormatHelper.FormatVersion, Compat.ServerVersion, BackupFormatHelper.SchemaVersion,
+            BackupFormatHelper.Format, BackupFormatHelper.FormatVersion, CompatHelper.ServerVersion, BackupFormatHelper.SchemaVersion,
             time.GetUtcNow().UtcDateTime.ToString("yyyy-MM-dd'T'HH:mm:ss'Z'", System.Globalization.CultureInfo.InvariantCulture), counts);
         await WriteJsonAsync(zip, BackupFormatHelper.ManifestEntry, manifest, ct);
 

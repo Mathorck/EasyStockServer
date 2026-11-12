@@ -53,7 +53,7 @@ public sealed partial class SessionHandler(
             .ToListAsync(ct)).FirstOrDefault();
 
         if (session is null || session.RevokedAt is not null)
-            throw AccountsHelper.Unauthenticated(ProblemTypes.SessionRevoked);
+            throw AccountsHelper.Unauthenticated(ProblemTypesHelper.SessionRevoked);
 
         if (!session.RefreshTokenHash.AsSpan().SequenceEqual(hash))
         {
@@ -62,7 +62,7 @@ public sealed partial class SessionHandler(
             await DeletePushRegistrationsAsync(session.Id, ct);
             await tx.CommitAsync(ct);
             LogReuse(log, session.Id, session.UserId);
-            throw AccountsHelper.Unauthenticated(ProblemTypes.SessionRevoked);
+            throw AccountsHelper.Unauthenticated(ProblemTypesHelper.SessionRevoked);
         }
 
         if (session.LastUsedAt + AuthLimitsHelper.RefreshIdleLifetime < now)
@@ -71,12 +71,12 @@ public sealed partial class SessionHandler(
             await db.SaveChangesAsync(ct);
             await DeletePushRegistrationsAsync(session.Id, ct);
             await tx.CommitAsync(ct);
-            throw AccountsHelper.Unauthenticated(ProblemTypes.SessionRevoked);
+            throw AccountsHelper.Unauthenticated(ProblemTypesHelper.SessionRevoked);
         }
 
         var user = await db.Users.SingleAsync(u => u.Id == session.UserId, ct);
         if (user.DisabledAt is not null || user.DeletedAt is not null)
-            throw AccountsHelper.Unauthenticated(ProblemTypes.AccountDisabled);
+            throw AccountsHelper.Unauthenticated(ProblemTypesHelper.AccountDisabled);
 
         var next = Rotate(session, now);
         await db.SaveChangesAsync(ct);
@@ -94,7 +94,7 @@ public sealed partial class SessionHandler(
             .FromSql($"SELECT * FROM device_session WHERE id = {sessionId} FOR UPDATE")
             .ToListAsync(ct)).FirstOrDefault();
         if (session is null || session.RevokedAt is not null)
-            throw AccountsHelper.Unauthenticated(ProblemTypes.SessionRevoked);
+            throw AccountsHelper.Unauthenticated(ProblemTypesHelper.SessionRevoked);
         var next = Rotate(session, time.GetUtcNow());
         await db.SaveChangesAsync(ct);
         return next;
@@ -130,7 +130,7 @@ public sealed partial class SessionHandler(
             return;
         }
         if (!await db.DeviceSessions.AnyAsync(s => s.Id == sessionId, ct))
-            throw ProblemException.Of(StatusCodes.Status404NotFound, ProblemTypes.NotFound);
+            throw ProblemException.Of(StatusCodes.Status404NotFound, ProblemTypesHelper.NotFound);
     }
 
     /// <summary>Revokes every live session of the user, except <paramref name="keep"/>.</summary>

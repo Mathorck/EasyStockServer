@@ -1,9 +1,9 @@
 using System.Reflection;
 
-namespace EasyStock.Server.Configuration;
+namespace EasyStock.Server.Helpers;
 
 /// <summary>Version constants. Placeholders until the app side defines real values.</summary>
-public static class Compat
+public static class CompatHelper
 {
     public const string MinAppVersion = "0.0.0";
 
@@ -12,6 +12,6 @@ public static class Compat
     public static readonly IReadOnlyList<int> SupportedSchemaVersions = [1];
 
     public static string ServerVersion { get; } =
-        typeof(Compat).Assembly.GetCustomAttribute<AssemblyInformationalVersionAttribute>()?.InformationalVersion
+        typeof(CompatHelper).Assembly.GetCustomAttribute<AssemblyInformationalVersionAttribute>()?.InformationalVersion
             .Split('+')[0] ?? "0.0.0";
 }

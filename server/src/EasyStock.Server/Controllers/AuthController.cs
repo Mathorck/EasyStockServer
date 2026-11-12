@@ -1,3 +1,4 @@
+using EasyStock.Server.Helpers;
 using EasyStock.Server.Filters;
 using EasyStock.Server.Configuration;
 using EasyStock.Server.Interfaces;
@@ -14,16 +15,16 @@ namespace EasyStock.Server.Controllers;
 /// </summary>
 [ApiController]
 [Route("api/v1/auth")]
-[ProducesResponseType<ProblemDetails>(StatusCodes.Status400BadRequest, ProblemTypes.ContentType)]
-[ProducesResponseType<ProblemDetails>(StatusCodes.Status429TooManyRequests, ProblemTypes.ContentType)]
+[ProducesResponseType<ProblemDetails>(StatusCodes.Status400BadRequest, ProblemTypesHelper.ContentType)]
+[ProducesResponseType<ProblemDetails>(StatusCodes.Status429TooManyRequests, ProblemTypesHelper.ContentType)]
 public sealed class AuthController : ControllerBase
 {
     /// <summary>Creates the first Admin with the setup token printed at startup. 409 setup-done afterwards.</summary>
     [HttpPost("setup")]
     [EnableRateLimiting(RateLimiting.AuthIp)]
     [ProducesResponseType<TokenAnswer>(StatusCodes.Status200OK)]
-    [ProducesResponseType<ProblemDetails>(StatusCodes.Status404NotFound, ProblemTypes.ContentType)]
-    [ProducesResponseType<ProblemDetails>(StatusCodes.Status409Conflict, ProblemTypes.ContentType)]
+    [ProducesResponseType<ProblemDetails>(StatusCodes.Status404NotFound, ProblemTypesHelper.ContentType)]
+    [ProducesResponseType<ProblemDetails>(StatusCodes.Status409Conflict, ProblemTypesHelper.ContentType)]
     public Task<TokenAnswer> Setup(SetupRequest request, [FromServices] SetupHandler setup, CancellationToken ct) =>
         setup.CompleteAsync(request, ct);
 
@@ -31,9 +32,9 @@ public sealed class AuthController : ControllerBase
     [HttpPost("invite/redeem")]
     [EnableRateLimiting(RateLimiting.AuthIp)]
     [ProducesResponseType<TokenAnswer>(StatusCodes.Status200OK)]
-    [ProducesResponseType<ProblemDetails>(StatusCodes.Status404NotFound, ProblemTypes.ContentType)]
-    [ProducesResponseType<ProblemDetails>(StatusCodes.Status409Conflict, ProblemTypes.ContentType)]
-    [ProducesResponseType<ProblemDetails>(StatusCodes.Status410Gone, ProblemTypes.ContentType)]
+    [ProducesResponseType<ProblemDetails>(StatusCodes.Status404NotFound, ProblemTypesHelper.ContentType)]
+    [ProducesResponseType<ProblemDetails>(StatusCodes.Status409Conflict, ProblemTypesHelper.ContentType)]
+    [ProducesResponseType<ProblemDetails>(StatusCodes.Status410Gone, ProblemTypesHelper.ContentType)]
     public Task<TokenAnswer> RedeemInvite(RedeemInviteRequest request, [FromServices] InviteHandler invites, CancellationToken ct) =>
         invites.RedeemAsync(request, ct);
 
@@ -41,9 +42,9 @@ public sealed class AuthController : ControllerBase
     [HttpPost("guest-signup")]
     [EnableRateLimiting(RateLimiting.AuthIp)]
     [ProducesResponseType<TokenAnswer>(StatusCodes.Status200OK)]
-    [ProducesResponseType<ProblemDetails>(StatusCodes.Status403Forbidden, ProblemTypes.ContentType)]
-    [ProducesResponseType<ProblemDetails>(StatusCodes.Status404NotFound, ProblemTypes.ContentType)]
-    [ProducesResponseType<ProblemDetails>(StatusCodes.Status409Conflict, ProblemTypes.ContentType)]
+    [ProducesResponseType<ProblemDetails>(StatusCodes.Status403Forbidden, ProblemTypesHelper.ContentType)]
+    [ProducesResponseType<ProblemDetails>(StatusCodes.Status404NotFound, ProblemTypesHelper.ContentType)]
+    [ProducesResponseType<ProblemDetails>(StatusCodes.Status409Conflict, ProblemTypesHelper.ContentType)]
     public Task<TokenAnswer> GuestSignup(GuestSignupRequest request, [FromServices] PublicInviteHandler publicInvite, CancellationToken ct) =>
         publicInvite.SignupAsync(request, ClientIp.Key(HttpContext), ct);
 
@@ -51,14 +52,14 @@ public sealed class AuthController : ControllerBase
     [HttpPost("login")]
     [EnableRateLimiting(RateLimiting.AuthIp)]
     [ProducesResponseType<TokenAnswer>(StatusCodes.Status200OK)]
-    [ProducesResponseType<ProblemDetails>(StatusCodes.Status401Unauthorized, ProblemTypes.ContentType)]
+    [ProducesResponseType<ProblemDetails>(StatusCodes.Status401Unauthorized, ProblemTypesHelper.ContentType)]
     public Task<TokenAnswer> Login(LoginRequest request, [FromServices] LoginHandler login, CancellationToken ct) =>
         login.LoginAsync(request, ct);
 
     /// <summary>New access and refresh tokens. Presenting an already used refresh token ends the session.</summary>
     [HttpPost("refresh")]
     [ProducesResponseType<TokenAnswer>(StatusCodes.Status200OK)]
-    [ProducesResponseType<ProblemDetails>(StatusCodes.Status401Unauthorized, ProblemTypes.ContentType)]
+    [ProducesResponseType<ProblemDetails>(StatusCodes.Status401Unauthorized, ProblemTypesHelper.ContentType)]
     public Task<TokenAnswer> Refresh(RefreshRequest request, [FromServices] SessionHandler sessions, CancellationToken ct) =>
         sessions.RefreshAsync(request.RefreshToken, ct);
 
@@ -66,8 +67,8 @@ public sealed class AuthController : ControllerBase
     [HttpPost("reset")]
     [EnableRateLimiting(RateLimiting.AuthIp)]
     [ProducesResponseType<TokenAnswer>(StatusCodes.Status200OK)]
-    [ProducesResponseType<ProblemDetails>(StatusCodes.Status404NotFound, ProblemTypes.ContentType)]
-    [ProducesResponseType<ProblemDetails>(StatusCodes.Status410Gone, ProblemTypes.ContentType)]
+    [ProducesResponseType<ProblemDetails>(StatusCodes.Status404NotFound, ProblemTypesHelper.ContentType)]
+    [ProducesResponseType<ProblemDetails>(StatusCodes.Status410Gone, ProblemTypesHelper.ContentType)]
     public Task<TokenAnswer> Reset(ResetPasswordRequest request, [FromServices] PasswordResetHandler resets, CancellationToken ct) =>
         resets.RedeemAsync(request, ct);
 
@@ -76,10 +77,10 @@ public sealed class AuthController : ControllerBase
     [RequireSession]
     [EnableRateLimiting(RateLimiting.AuthIp)]
     [ProducesResponseType<TokenAnswer>(StatusCodes.Status200OK)]
-    [ProducesResponseType<ProblemDetails>(StatusCodes.Status401Unauthorized, ProblemTypes.ContentType)]
-    [ProducesResponseType<ProblemDetails>(StatusCodes.Status404NotFound, ProblemTypes.ContentType)]
-    [ProducesResponseType<ProblemDetails>(StatusCodes.Status409Conflict, ProblemTypes.ContentType)]
-    [ProducesResponseType<ProblemDetails>(StatusCodes.Status410Gone, ProblemTypes.ContentType)]
+    [ProducesResponseType<ProblemDetails>(StatusCodes.Status401Unauthorized, ProblemTypesHelper.ContentType)]
+    [ProducesResponseType<ProblemDetails>(StatusCodes.Status404NotFound, ProblemTypesHelper.ContentType)]
+    [ProducesResponseType<ProblemDetails>(StatusCodes.Status409Conflict, ProblemTypesHelper.ContentType)]
+    [ProducesResponseType<ProblemDetails>(StatusCodes.Status410Gone, ProblemTypesHelper.ContentType)]
     public Task<TokenAnswer> CompletePromotion(
         CompletePromotionRequest request,
         [FromServices] ICurrentUser current,
@@ -91,7 +92,7 @@ public sealed class AuthController : ControllerBase
     [HttpPost("logout")]
     [RequireSession]
     [ProducesResponseType(StatusCodes.Status204NoContent)]
-    [ProducesResponseType<ProblemDetails>(StatusCodes.Status401Unauthorized, ProblemTypes.ContentType)]
+    [ProducesResponseType<ProblemDetails>(StatusCodes.Status401Unauthorized, ProblemTypesHelper.ContentType)]
     public async Task<NoContentResult> Logout(
         [FromServices] ICurrentUser current, [FromServices] AccountHandler accounts, CancellationToken ct)
     {

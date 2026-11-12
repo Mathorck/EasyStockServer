@@ -1,4 +1,3 @@
-using EasyStock.Server.Configuration;
 using EasyStock.Server.Enums;
 using EasyStock.Server.Helpers;
 using EasyStock.Server.Interfaces;
@@ -23,7 +22,7 @@ public sealed class RequirePermissionAttribute(Permission permission) : Attribut
         if (!current.IsAuthenticated)
             context.Result = AuthFailureHelper.Unauthenticated(context.HttpContext);
         else if (!Permissions.Can(current.Role, Permission))
-            context.Result = ProblemTypes.Problem(StatusCodes.Status403Forbidden, ProblemTypes.NotAllowed);
+            context.Result = ProblemTypesHelper.Problem(StatusCodes.Status403Forbidden, ProblemTypesHelper.NotAllowed);
         return Task.CompletedTask;
     }
 }

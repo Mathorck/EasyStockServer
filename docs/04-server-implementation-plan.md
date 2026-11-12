@@ -30,7 +30,7 @@ The plan is built from `docs/03-server-spec.md` alone (362 lines). It has five p
 | App `BackupMerge` (Kotlin) | Exact suffix formats (SKU, serial), truncation, ATTRIBUTE_MERGED semantics, rule order | Implement rules behind a pure `ConflictRules` class with one method per rule. Assume the `" (n)"` suffix for every renamed value, cutting the base so that base plus suffix fits the column maximum. Re-verify line by line against the Kotlin code. |
 | App `Permissions` object | Exact role × operation matrix | Encode the spec's role prose (section 1.3 of the matrix below). **Recommendation:** add a shared fixture `docs/test-cases/permissions.json` (role → list of permission names). Both the Kotlin and the C# tests assert their object equals it, which removes drift for good. |
 | App `@SerialName` values and enum string values | JSON names in push and pull | Use camelCase forms of the dbml column names (the spec examples are consistent with this: `articleId`, `occurredAt`). Keep all names in `Sync/Dtos/`, so a rename touches one folder. |
-| App version numbers, schema versions | `server-info` and the 426 check | Use constants in `Infrastructure/Compat.cs`: `MinAppVersion = "0.0.0"` placeholder and `SupportedSchemaVersions = [1]`. Bump them in the same PR that changes the protocol. |
+| App version numbers, schema versions | `server-info` and the 426 check | Use constants in `Infrastructure/CompatHelper.cs`: `MinAppVersion = "0.0.0"` placeholder and `SupportedSchemaVersions = [1]`. Bump them in the same PR that changes the protocol. |
 | QR content formats (setup, invite, public, reset) | Auth endpoint answers, setup log | Proposed below, to confirm with `02-app-changes.md`. |
 | App backup file format | `GET/POST /admin/backup` | Phase 11 is blocked. Design the service boundary now; implement once the format is known. |
 | 01/02 docs | Flow details (promotion UX, QR scanning, how photos are fetched) | Ask for them. Several decisions below may already be answered there. |
@@ -199,10 +199,10 @@ The build order deviates from the suggested one, on purpose. Everything not bloc
 - `src/EasyStock.Server/Program.cs`. Keep it thin: `builder.AddEasyStock()` / `app.UseEasyStock()` extension methods.
 - `src/EasyStock.Server/Infrastructure/`:
   - `ServerOptions.cs`: binds `EASYSTOCK_*` and validates at start (fail fast when `EASYSTOCK_DB` or `EASYSTOCK_PUBLIC_URL` is missing, or `PUBLIC_URL` is not absolute).
-  - `ProblemTypes.cs`: the catalogue, see 3.6.
+  - `ProblemTypesHelper.cs`: the catalogue, see 3.6.
   - `Problems.cs`: helpers returning `TypedResults.Problem` with a stable `type`.
   - `ExceptionMapping.cs`: maps `DbUpdateException`/`PostgresException` to Problem Details without the PostgreSQL message, which contains row content.
-  - `VersionHeaderMiddleware.cs`, `Compat.cs` (min app version, supported schema versions, server version from `AssemblyInformationalVersion`).
+  - `VersionHeaderMiddleware.cs`, `CompatHelper.cs` (min app version, supported schema versions, server version from `AssemblyInformationalVersion`).
   - `Json.cs`: `JsonSerializerDefaults.Web`, camelCase properties, `DictionaryKeyPolicy = null` so table-name keys stay snake_case, string enums with an explicit naming policy.
   - `HealthCheck.cs`: `AddHealthChecks().AddDbContextCheck<>()` at `/health`, plus a `--healthcheck` CLI mode for Docker (Phase 12).
   - `Logging.cs`: level from `EASYSTOCK_LOG_LEVEL`; `Microsoft.EntityFrameworkCore.Database.Command` at Warning; `EnableSensitiveDataLogging` never on.
@@ -646,7 +646,7 @@ Also update `docs/03-server-spec.md` with the decisions from 1.2 so the spec sta
 - No rotation in v1. Deleting the file rotates the key; the effect is one refresh per phone.
 - Data-protection keys go to `${DATA_DIR}/dp-keys` (`PersistKeysToFileSystem`, `SetApplicationName("EasyStock.Server")`). They are barely used, but this keeps Identity's token providers stable.
 
-### 3.6 Problem Details type catalogue (`Infrastructure/ProblemTypes.cs`)
+### 3.6 Problem Details type catalogue (`Infrastructure/ProblemTypesHelper.cs`)
 
 | type | status | when |
 |---|---|---|
@@ -685,7 +685,7 @@ Per-row push reasons are a separate, smaller set inside `results[].reason`: `not
 
 - `VersionHeaderMiddleware` runs before routing and skips the exempt prefixes (1.2 #24).
 - It parses `X-EasyStock-App-Version` as `System.Version` (major.minor.patch) and `X-EasyStock-Schema-Version` as an int.
-- If the app version is below `Compat.MinAppVersion`, the schema version is outside `Compat.SupportedSchemaVersions`, or either header is missing or unparsable, it answers 426 `app-too-old`. The extensions carry `minAppVersion` and `supportedSchemaVersions` so the app can show a precise message.
+- If the app version is below `CompatHelper.MinAppVersion`, the schema version is outside `CompatHelper.SupportedSchemaVersions`, or either header is missing or unparsable, it answers 426 `app-too-old`. The extensions carry `minAppVersion` and `supportedSchemaVersions` so the app can show a precise message.
 - An OpenAPI operation transformer documents both headers on every non-exempt operation.
 
 ### 3.8 Identity customisation

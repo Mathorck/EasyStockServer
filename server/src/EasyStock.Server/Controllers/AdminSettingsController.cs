@@ -1,5 +1,5 @@
+using EasyStock.Server.Helpers;
 using EasyStock.Server.Filters;
-using EasyStock.Server.Configuration;
 using EasyStock.Server.Enums;
 using EasyStock.Server.Models;
 using EasyStock.Server.Handlers.Settings;
@@ -32,7 +32,7 @@ public sealed class AdminSettingsController(SettingsHandler store) : ControllerB
     }
 
     private IActionResult InvalidSettings(string detail) =>
-        ProblemTypes.Problem(StatusCodes.Status400BadRequest, ProblemTypes.ValidationFailed, detail: detail);
+        ProblemTypesHelper.Problem(StatusCodes.Status400BadRequest, ProblemTypesHelper.ValidationFailed, detail: detail);
 
     private string? FirstModelError() => ModelState.Values
         .SelectMany(v => v.Errors)

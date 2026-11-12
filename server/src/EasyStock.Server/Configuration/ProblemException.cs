@@ -1,3 +1,5 @@
+using EasyStock.Server.Helpers;
+
 namespace EasyStock.Server.Configuration;
 
 /// <summary>
@@ -25,7 +27,7 @@ public sealed class ProblemException(
 
     /// <summary>400 <c>validation-failed</c> with an <c>errors</c> map, like a model validation failure.</summary>
     public static ProblemException Validation(string field, params string[] messages) =>
-        new(StatusCodes.Status400BadRequest, ProblemTypes.ValidationFailed,
+        new(StatusCodes.Status400BadRequest, ProblemTypesHelper.ValidationFailed,
             extensions: new Dictionary<string, object?> { ["errors"] = new Dictionary<string, string[]> { [field] = messages } });
 
     public static ProblemException Of(int status, string type, string? detail = null) => new(status, type, detail);

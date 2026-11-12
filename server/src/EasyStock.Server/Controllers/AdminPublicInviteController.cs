@@ -1,5 +1,5 @@
+using EasyStock.Server.Helpers;
 using EasyStock.Server.Filters;
-using EasyStock.Server.Configuration;
 using EasyStock.Server.Enums;
 using EasyStock.Server.Models;
 using EasyStock.Server.Handlers.Auth;
@@ -11,8 +11,8 @@ namespace EasyStock.Server.Controllers;
 [ApiController]
 [Route("api/v1/admin/public-invite")]
 [RequirePermission(Permission.Administer)]
-[ProducesResponseType<ProblemDetails>(StatusCodes.Status401Unauthorized, ProblemTypes.ContentType)]
-[ProducesResponseType<ProblemDetails>(StatusCodes.Status403Forbidden, ProblemTypes.ContentType)]
+[ProducesResponseType<ProblemDetails>(StatusCodes.Status401Unauthorized, ProblemTypesHelper.ContentType)]
+[ProducesResponseType<ProblemDetails>(StatusCodes.Status403Forbidden, ProblemTypesHelper.ContentType)]
 public sealed class AdminPublicInviteController(PublicInviteHandler publicInvites) : ControllerBase
 {
     /// <summary>The state of the printed QR code: on or off, the Guest limit, the Guest count and when the code was made.</summary>
@@ -23,7 +23,7 @@ public sealed class AdminPublicInviteController(PublicInviteHandler publicInvite
     /// <summary>Turns the printed QR code on or off and sets the Guest limit (absent: no limit).</summary>
     [HttpPut]
     [ProducesResponseType<PublicInviteAnswer>(StatusCodes.Status200OK)]
-    [ProducesResponseType<ProblemDetails>(StatusCodes.Status400BadRequest, ProblemTypes.ContentType)]
+    [ProducesResponseType<ProblemDetails>(StatusCodes.Status400BadRequest, ProblemTypesHelper.ContentType)]
     public Task<PublicInviteAnswer> Update(UpdatePublicInviteRequest request, CancellationToken ct) =>
         publicInvites.UpdateAsync(request.Enabled!.Value, request.GuestLimit, ct);
 
