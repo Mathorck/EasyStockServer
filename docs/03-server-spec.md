@@ -383,6 +383,7 @@ Pull answer:
 * Sync: concurrent pushes never let a pull skip a row.
 * Conflicts: every JSON test case gives the expected result.
 * Guest filter: a Guest pull never contains an author, a device, a comment or a review; stock computed from it matches a Member's.
+* End-to-end: the app's own client and sync code (Room on the host JVM) runs against the Docker image with PostgreSQL. `server/e2e/run.sh` starts a throwaway server, runs the app's E2E tests and stops it; see [05-e2e-tests.md](05-e2e-tests.md). No server option is needed for it.
 * Alerts: exactly at the threshold, just under, just above, under and back within one batch, serial articles ignored, the author is not notified.
 * Retention job: removes authors after the set time and bumps `server_seq`.
 

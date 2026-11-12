@@ -1,0 +1,18 @@
+# Test override of ../docker-compose.yml for the end-to-end tests (start.sh): local image tag, no restart,
+# plain HTTP on 127.0.0.1 and a port chosen by start.sh, fast health checks. Volumes are thrown away by stop.sh.
+services:
+  db:
+    restart: "no"
+    healthcheck:
+      interval: 2s
+      retries: 30
+
+  server:
+    image: easystock-server:e2e
+    restart: "no"
+    ports: !override
+      - "127.0.0.1:${EASYSTOCK_E2E_PORT:?set by start.sh}:8080"
+    healthcheck:
+      interval: 2s
+      timeout: 5s
+      retries: 60

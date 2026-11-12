@@ -13,3 +13,6 @@ TestResults/
 
 # Claude Code agent worktrees (local only)
 .claude/worktrees/
+
+# End-to-end test runs (server/e2e/start.sh)
+server/e2e/.run/
