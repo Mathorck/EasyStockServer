@@ -130,28 +130,6 @@ On the first start with no user, the server prints a **setup token** and a `setu
 
 ---
 
-## 🔒 HTTPS
-
-The server speaks plain HTTP on port 8080 and expects a reverse proxy for HTTPS. Plain HTTP works too, but the app warns before it connects.
-
-**Caddy** (automatic Let's Encrypt), proxying to the container:
-
-```
-stock.example.org {
-    reverse_proxy localhost:8080
-}
-```
-
-Then set `EASYSTOCK_PUBLIC_URL=https://stock.example.org` and `EASYSTOCK_TRUSTED_PROXIES` to the proxy address.
-
-**Self-signed certificate**: compute its SHA-256 fingerprint and put it in `EASYSTOCK_CERT_FINGERPRINT`, so the QR codes carry it and the app can pin it:
-
-```
-openssl x509 -in cert.pem -noout -fingerprint -sha256
-```
-
----
-
 ## Backups
 
 Your data lives in two places. **Back up both**:
