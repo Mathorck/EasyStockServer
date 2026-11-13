@@ -57,6 +57,20 @@ public sealed class AdminSettingsTests(PostgresFixture pg) : IAsyncLifetime
     }
 
     [Fact]
+    public async Task Old_app_sending_the_dropped_retention_setting_can_still_save()
+    {
+        var ct = TestContext.Current.CancellationToken;
+        var client = await Client(Role.Admin);
+        var put = await client.PutAsJsonAsync(Url, new { serverName = "Atelier", movementAuthorRetentionDays = 90 }, ct);
+        Assert.Equal(HttpStatusCode.OK, put.StatusCode);
+        var body = await put.Content.ReadFromJsonAsync<JsonElement>(ct);
+        Assert.Equal("Atelier", body.GetProperty("serverName").GetString());
+        Assert.False(body.TryGetProperty("movementAuthorRetentionDays", out _));
+        var get = await client.GetFromJsonAsync<JsonElement>(Url, ct);
+        Assert.False(get.TryGetProperty("movementAuthorRetentionDays", out _));
+    }
+
+    [Fact]
     public async Task Old_retention_row_is_ignored()
     {
         var ct = TestContext.Current.CancellationToken;

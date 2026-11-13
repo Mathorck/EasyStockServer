@@ -11,6 +11,13 @@ public sealed record ServerSettings(string ServerName)
 
     public static ServerSettings Defaults { get; } = new(DefaultServerName);
 
+    /// <summary>
+    /// Dropped setting, still sent by apps older than its removal: accepted and ignored so their save keeps working.
+    /// Never stored and never returned.
+    /// </summary>
+    [JsonIgnore(Condition = JsonIgnoreCondition.WhenWritingNull)]
+    public int? MovementAuthorRetentionDays { get; init; }
+
     /// <summary>Returns a message for the first invalid value, or null when every value is valid.</summary>
     public string? Validate()
     {

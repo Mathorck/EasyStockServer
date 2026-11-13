@@ -28,7 +28,7 @@ public sealed class AdminSettingsController(SettingsHandler store) : ControllerB
             return InvalidSettings(error);
 
         await store.SaveAsync(settings, ct);
-        return Ok(settings);
+        return Ok(settings with { MovementAuthorRetentionDays = null });
     }
 
     private IActionResult InvalidSettings(string detail) =>
