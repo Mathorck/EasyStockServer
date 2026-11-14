@@ -27,12 +27,13 @@ public sealed partial class BackupImageHandler(ImageHandler store, EasyStockDbCo
     public async Task<bool> ExistsAsync(string sha256, CancellationToken ct) =>
         store.Exists(Checked(sha256)) && await db.Set<ImageRecord>().AnyAsync(i => i.Sha256 == sha256, ct);
 
-    public async Task WriteAsync(string sha256, Stream content, CancellationToken ct)
+    public async Task<bool> WriteAsync(string sha256, Stream content, CancellationToken ct)
     {
-        // Same checks as PUT /images: a photo that is not a JPEG, too large or not matching its hash is skipped.
-        var result = await store.SaveAsync(Checked(sha256), content, ct);
-        if (result.Status != ImageSaveStatus.Saved) return;
+        // Same checks as PUT /images: a photo that is not a JPEG, too large or not matching its hash is not stored.
+        var result = await store.SaveAsync(Checked(sha256), content, quotaRemaining: null, ct);
+        if (result.Status != ImageSaveStatus.Saved) return false;
         await db.Database.ExecuteSqlInterpolatedAsync(
             $"INSERT INTO image (sha256, size, created_at) VALUES ({sha256}, {result.Size}, {time.GetUtcNow().ToUnixTimeMilliseconds()}) ON CONFLICT (sha256) DO NOTHING", ct);
+        return true;
     }
 }

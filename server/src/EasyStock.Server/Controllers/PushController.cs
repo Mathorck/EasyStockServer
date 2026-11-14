@@ -20,13 +20,15 @@ public sealed class PushController(EasyStockDbContext db, ICurrentUser currentUs
     /// <summary>Saves the UnifiedPush endpoint of the current device session (insert or replace).</summary>
     [HttpPost("register")]
     [RequirePermission(Permission.ViewStock)] // every signed-in role may register
+    [ProducesResponseType(StatusCodes.Status204NoContent)]
+    [ProducesResponseType<ProblemDetails>(StatusCodes.Status400BadRequest, ProblemTypesHelper.ContentType)]
     public async Task<IActionResult> Register([FromBody] PushRegisterRequest? request, CancellationToken ct)
     {
         var endpoint = request?.Endpoint;
         if (!IsAcceptableEndpoint(endpoint))
             return ProblemTypesHelper.Problem(StatusCodes.Status400BadRequest, ProblemTypesHelper.ValidationFailed,
                 "Invalid push endpoint",
-                $"The endpoint must be an absolute http or https URL of at most {MaxEndpointLength} characters.");
+                $"The endpoint must be a public https URL (no localhost or private address) of at most {MaxEndpointLength} characters.");
 
         var sessionId = currentUser.SessionId;
         var now = time.GetUtcNow().ToUnixTimeMilliseconds();
@@ -42,6 +44,7 @@ public sealed class PushController(EasyStockDbContext db, ICurrentUser currentUs
     /// <summary>Removes the UnifiedPush endpoint of the current device session. Idempotent: 204 even if none was saved.</summary>
     [HttpDelete("register")]
     [RequirePermission(Permission.ViewStock)]
+    [ProducesResponseType(StatusCodes.Status204NoContent)]
     public async Task<IActionResult> Unregister(CancellationToken ct)
     {
         var sessionId = currentUser.SessionId;
@@ -53,5 +56,8 @@ public sealed class PushController(EasyStockDbContext db, ICurrentUser currentUs
         endpoint is { Length: > 0 and <= MaxEndpointLength }
         && Uri.TryCreate(endpoint, UriKind.Absolute, out var uri)
         && uri.IsWellFormedOriginalString()
-        && (uri.Scheme == Uri.UriSchemeHttp || uri.Scheme == Uri.UriSchemeHttps);
+        // http and LAN hosts stay allowed: a self-hosted ntfy on the home network is a normal setup.
+        && (uri.Scheme == Uri.UriSchemeHttps || uri.Scheme == Uri.UriSchemeHttp)
+        && uri.Host.Length > 0
+        && uri.UserInfo.Length == 0;
 }

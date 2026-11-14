@@ -29,6 +29,8 @@ public sealed class Program
                 o.CertFingerprint = parsed.CertFingerprint;
                 o.LogLevel = parsed.LogLevel;
                 o.TrustedProxies = parsed.TrustedProxies;
+                o.ImageQuotaBytes = parsed.ImageQuotaBytes;
+                o.CleanupIntervalMinutes = parsed.CleanupIntervalMinutes;
             });
         // The build-time OpenAPI generator starts the app without any EASYSTOCK_* variables.
         if (!IsOpenApiGenerator)
@@ -37,7 +39,8 @@ public sealed class Program
 
         builder.Services.AddSingleton(TimeProvider.System);
         builder.Services.AddEasyStockApi();
-        builder.Services.AddOpenApi("v1");
+        builder.Services.AddEasyStockCompression();
+        builder.Services.AddEasyStockOpenApi();
         builder.Services.AddDbContext<EasyStockDbContext>((sp, o) =>
             EasyStockDbContext.Configure(o, sp.GetRequiredService<IOptions<ServerOptions>>().Value.Db));
         builder.Services.AddHealthChecks().AddDbContextCheck<EasyStockDbContext>();
@@ -51,6 +54,8 @@ public sealed class Program
         builder.Services.AddSettings();
         builder.Services.AddServerInfo();
         builder.Services.AddBackup();
+        // The OpenAPI generator has no database to clean.
+        builder.Services.AddCleanup(job: !IsOpenApiGenerator);
         builder.Services.AddSyncPull();
         builder.Services.AddSyncPush();
         // After the migrator: creates the dataset epoch on the first start and caches it.
@@ -60,6 +65,7 @@ public sealed class Program
 
         app.UseForwardedHeaders();
         app.UseExceptionHandler();
+        app.UseEasyStockCompression();
         app.UseMiddleware<VersionHeaderMiddleware>();
         app.UseRouting();
         app.UseAuthentication();

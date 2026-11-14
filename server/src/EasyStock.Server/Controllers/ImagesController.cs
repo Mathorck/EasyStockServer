@@ -1,3 +1,4 @@
+using EasyStock.Server.Configuration;
 using EasyStock.Server.Filters;
 using EasyStock.Server.Interfaces;
 using EasyStock.Server.DB;
@@ -9,12 +10,13 @@ using EasyStock.Server.Handlers.Images;
 using Microsoft.AspNetCore.Mvc;
 using Microsoft.EntityFrameworkCore;
 using Microsoft.Net.Http.Headers;
+using Microsoft.Extensions.Options;
 
 namespace EasyStock.Server.Controllers;
 
 [ApiController]
 [Route("api/v1/images/{sha256:regex(^[[0-9a-fA-F]]{{64}}$)}")]
-public sealed class ImagesController(EasyStockDbContext db, ImageHandler store, TimeProvider time) : ControllerBase
+public sealed class ImagesController(EasyStockDbContext db, ImageHandler store, IOptions<ServerOptions> options, TimeProvider time) : ControllerBase
 {
     [HttpHead]
     [RequirePermission(Permission.ViewStock)]
@@ -58,6 +60,7 @@ public sealed class ImagesController(EasyStockDbContext db, ImageHandler store, 
     [ProducesResponseType<ProblemDetails>(StatusCodes.Status413PayloadTooLarge, "application/problem+json")]
     [ProducesResponseType<ProblemDetails>(StatusCodes.Status415UnsupportedMediaType, "application/problem+json")]
     [RequestSizeLimit(ImageHandler.MaxBytes + 1)]
+    [RawBody("image/jpeg", Description = "The JPEG bytes, at most 5 MB.")]
     public async Task<IActionResult> Put(string sha256, CancellationToken ct)
     {
         sha256 = sha256.ToLowerInvariant();
@@ -67,8 +70,13 @@ public sealed class ImagesController(EasyStockDbContext db, ImageHandler store, 
         if (Request.ContentLength > ImageHandler.MaxBytes)
             return ProblemTypesHelper.Problem(StatusCodes.Status413PayloadTooLarge, ProblemTypesHelper.ImageTooLarge);
 
+        // A photo already stored costs nothing more; a new one must fit under the storage cap.
+        long? remaining = null;
+        if (!await db.Set<ImageRecord>().AnyAsync(i => i.Sha256 == sha256, ct))
+            remaining = options.Value.ImageQuotaBytes - await ImageHandler.UsedBytesAsync(db, ct);
+
         ImageSaveResult result;
-        try { result = await store.SaveAsync(sha256, Request.Body, ct); }
+        try { result = await store.SaveAsync(sha256, Request.Body, remaining, ct); }
         catch (BadHttpRequestException e) when (e.StatusCode == StatusCodes.Status413PayloadTooLarge)
         {
             return ProblemTypesHelper.Problem(StatusCodes.Status413PayloadTooLarge, ProblemTypesHelper.ImageTooLarge);
@@ -78,6 +86,8 @@ public sealed class ImagesController(EasyStockDbContext db, ImageHandler store, 
         {
             case ImageSaveStatus.TooLarge:
                 return ProblemTypesHelper.Problem(StatusCodes.Status413PayloadTooLarge, ProblemTypesHelper.ImageTooLarge);
+            case ImageSaveStatus.QuotaExceeded:
+                return ProblemTypesHelper.Problem(StatusCodes.Status413PayloadTooLarge, ProblemTypesHelper.ImageQuotaExceeded);
             case ImageSaveStatus.NotJpeg:
                 return ProblemTypesHelper.Problem(StatusCodes.Status400BadRequest, ProblemTypesHelper.NotJpeg);
             case ImageSaveStatus.HashMismatch:

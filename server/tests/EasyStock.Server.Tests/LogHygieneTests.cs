@@ -16,7 +16,8 @@ public sealed class LogHygieneTests(PostgresFixture pg)
     public async Task Logs_never_contain_tokens_passwords_or_display_names()
     {
         var ct = TestContext.Current.CancellationToken;
-        using var factory = new ApiFactory(await pg.CreateDatabaseAsync());
+        using var factory = new ApiFactory(await pg.CreateDatabaseAsync(),
+            settings: new Dictionary<string, string> { ["EASYSTOCK_LOG_LEVEL"] = "Debug" });
         var client = factory.CreateVersionedClient();
         var setupToken = Assert.Single(factory.Logs.SetupTokens());
         var secrets = new List<string> { AuthHelpers.Password, "second password!", DisplayName };
@@ -54,6 +55,7 @@ public sealed class LogHygieneTests(PostgresFixture pg)
 
         var events = factory.Logs.Events;
         Assert.NotEmpty(events);
+        Assert.Contains(events, e => e.Level == Serilog.Events.LogEventLevel.Debug); // really scanning at Debug
         foreach (var e in events)
         {
             var text = LogCapture.Text(e);

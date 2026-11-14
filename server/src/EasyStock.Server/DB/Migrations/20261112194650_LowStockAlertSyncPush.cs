@@ -1,5 +1,4 @@
 ﻿using System;
-using EasyStock.Server.Helpers;
 using Microsoft.EntityFrameworkCore.Migrations;
 
 #nullable disable
@@ -104,13 +103,15 @@ namespace EasyStock.Server.DB.Migrations
                 table: "sync_batch",
                 column: "user_id");
 
-            migrationBuilder.Sql(PushSqlHelper.CreateLowStockAlertTrigger);
+            // Frozen SQL: low_stock_alert is pulled by server_seq like the shared tables, so it gets the same trigger.
+            migrationBuilder.Sql(
+                "CREATE TRIGGER low_stock_alert_server_seq BEFORE INSERT OR UPDATE ON low_stock_alert FOR EACH ROW EXECUTE FUNCTION set_server_seq();");
         }
 
         /// <inheritdoc />
         protected override void Down(MigrationBuilder migrationBuilder)
         {
-            migrationBuilder.Sql(PushSqlHelper.DropLowStockAlertTrigger);
+            migrationBuilder.Sql("DROP TRIGGER low_stock_alert_server_seq ON low_stock_alert;");
 
             migrationBuilder.DropTable(
                 name: "low_stock_alert");

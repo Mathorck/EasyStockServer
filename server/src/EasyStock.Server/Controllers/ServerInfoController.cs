@@ -9,5 +9,6 @@ namespace EasyStock.Server.Controllers;
 public sealed class ServerInfoController(ServerInfoHandler info) : ControllerBase
 {
     [HttpGet]
+    [ProducesResponseType<ServerInfo>(StatusCodes.Status200OK)]
     public Task<ServerInfo> Get(CancellationToken ct) => info.GetAsync(ct);
 }

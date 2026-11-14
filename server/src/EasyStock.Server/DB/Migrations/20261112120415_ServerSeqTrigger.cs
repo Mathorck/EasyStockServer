@@ -14,15 +14,31 @@ namespace EasyStock.Server.DB.Migrations
             "item", "stock_movement", "stock_review", "stock_review_line",
         ];
 
+        // Frozen SQL, written out rather than built from DB/ServerSeq.cs, so a later change there cannot change what
+        // this migration did. 76224182963779 is ServerSeq.SyncLockKey.
+        private const string CreateFunctionSql =
+            """
+            CREATE SEQUENCE server_seq AS bigint;
+            CREATE FUNCTION set_server_seq() RETURNS trigger LANGUAGE plpgsql AS $$
+            BEGIN
+                PERFORM pg_advisory_xact_lock(76224182963779);
+                NEW.server_seq := nextval('server_seq');
+                RETURN NEW;
+            END
+            $$;
+            """;
+
         /// <inheritdoc />
         protected override void Up(MigrationBuilder migrationBuilder)
         {
-            migrationBuilder.Sql(ServerSeq.CreateFunctionSql);
-            foreach (var table in Tables) migrationBuilder.Sql(ServerSeq.CreateTriggerSql(table));
+            migrationBuilder.Sql(CreateFunctionSql);
+            foreach (var table in Tables)
+                migrationBuilder.Sql(
+                    $"CREATE TRIGGER {table}_server_seq BEFORE INSERT OR UPDATE ON {table} FOR EACH ROW EXECUTE FUNCTION set_server_seq();");
         }
 
         /// <inheritdoc />
         protected override void Down(MigrationBuilder migrationBuilder) =>
-            migrationBuilder.Sql(ServerSeq.DropFunctionSql); // CASCADE drops the triggers
+            migrationBuilder.Sql("DROP FUNCTION set_server_seq() CASCADE; DROP SEQUENCE server_seq;"); // CASCADE drops the triggers
     }
 }

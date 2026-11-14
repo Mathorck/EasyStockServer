@@ -258,13 +258,21 @@ namespace EasyStock.Server.DB.Migrations
                 column: "short_code",
                 unique: true);
 
-            migrationBuilder.Sql(ServerSeq.CreateUsersTriggersSql);
+            // Frozen SQL (not built from DB/ServerSeq.cs). users: a new user always gets a server_seq; an update only
+            // when the synced columns change. Two triggers because a WHEN clause cannot mention OLD on insert.
+            migrationBuilder.Sql(
+                """
+                CREATE TRIGGER users_server_seq_insert BEFORE INSERT ON users FOR EACH ROW EXECUTE FUNCTION set_server_seq();
+                CREATE TRIGGER users_server_seq_update BEFORE UPDATE ON users FOR EACH ROW
+                    WHEN (OLD.display_name IS DISTINCT FROM NEW.display_name OR OLD.deleted_at IS DISTINCT FROM NEW.deleted_at)
+                    EXECUTE FUNCTION set_server_seq();
+                """);
         }
 
         /// <inheritdoc />
         protected override void Down(MigrationBuilder migrationBuilder)
         {
-            migrationBuilder.Sql(ServerSeq.DropUsersTriggersSql);
+            migrationBuilder.Sql("DROP TRIGGER users_server_seq_update ON users; DROP TRIGGER users_server_seq_insert ON users;");
 
             migrationBuilder.DropTable(
                 name: "device_session");

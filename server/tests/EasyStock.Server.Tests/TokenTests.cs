@@ -34,8 +34,10 @@ public sealed class TokenTests(PostgresFixture pg)
         Assert.Equal(15 * 60, claims.GetProperty("exp").GetInt64() - claims.GetProperty("iat").GetInt64());
         Assert.Equal(DateTimeOffset.FromUnixTimeSeconds(claims.GetProperty("exp").GetInt64()), user.Tokens.AccessTokenExpiresAt);
 
-        var refresh = Convert.FromBase64String(user.RefreshToken.Replace('-', '+').Replace('_', '/') + "=");
-        Assert.Equal(32, refresh.Length);
+        // Refresh token: session id (16) | random nonce (32) | HMAC tag (16), Base64URL without padding.
+        var refresh = System.Buffers.Text.Base64Url.DecodeFromChars(user.RefreshToken);
+        Assert.Equal(64, refresh.Length);
+        Assert.Equal(Guid.Parse(claims.GetProperty("sid").GetString()!), new Guid(refresh.AsSpan(0, 16)));
     }
 
     [Fact]

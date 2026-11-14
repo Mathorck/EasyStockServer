@@ -1,9 +1,11 @@
+using EasyStock.Server.Configuration;
 using EasyStock.Server.Helpers;
 using EasyStock.Server.Filters;
 using EasyStock.Server.Interfaces;
 using EasyStock.Server.Models;
 using EasyStock.Server.Handlers.Auth;
 using Microsoft.AspNetCore.Mvc;
+using Microsoft.AspNetCore.RateLimiting;
 
 namespace EasyStock.Server.Controllers;
 
@@ -29,9 +31,11 @@ public sealed class MeController(ICurrentUser current, AccountHandler accounts) 
 
     /// <summary>Changes the password of a full account; the other sessions end.</summary>
     [HttpPost("password")]
+    [EnableRateLimiting(RateLimiting.AuthIp)]
     [ProducesResponseType(StatusCodes.Status204NoContent)]
     [ProducesResponseType<ProblemDetails>(StatusCodes.Status400BadRequest, ProblemTypesHelper.ContentType)]
     [ProducesResponseType<ProblemDetails>(StatusCodes.Status403Forbidden, ProblemTypesHelper.ContentType)]
+    [ProducesResponseType<ProblemDetails>(StatusCodes.Status429TooManyRequests, ProblemTypesHelper.ContentType)]
     public async Task<NoContentResult> ChangePassword(ChangePasswordRequest request, CancellationToken ct)
     {
         await accounts.ChangePasswordAsync(current.UserId, current.SessionId, request, ct);

@@ -197,6 +197,9 @@ public sealed class SyncPushTests(PostgresFixture pg) : IDisposable
         var client = _factory.PushClient(await _factory.SignInAsync(Role.Member));
 
         var first = await client.PushAsync(body);
+        Assert.Equal(HttpStatusCode.OK, first.Status);
+        Assert.Equal("accepted", (string?)first.Result("category", category.Id)["status"]);
+        Assert.Equal("accepted", (string?)first.Result("stock_movement", movement.Id)["status"]);
         var seq = (await Row<Category>(category.Id)).ServerSeq;
         var again = await client.PushAsync(body);
 
@@ -216,6 +219,37 @@ public sealed class SyncPushTests(PostgresFixture pg) : IDisposable
 
         Assert.Equal(HttpStatusCode.Conflict, answer.Status);
         Assert.Equal("batch-id-reused", (string?)answer.Json["type"]);
+    }
+
+    [Fact]
+    public async Task Same_batch_id_with_other_rows_is_409_and_applies_nothing()
+    {
+        var batchId = Guid.NewGuid();
+        var client = _factory.PushClient(await _factory.SignInAsync(Role.Member));
+        await client.PushAsync(Body(batchId, ("category", Wire(NewCategory()))));
+        var other = NewCategory();
+
+        var answer = await client.PushAsync(Body(batchId, ("category", Wire(other))));
+
+        Assert.Equal(HttpStatusCode.Conflict, answer.Status);
+        Assert.Equal("batch-id-reused", (string?)answer.Json["type"]);
+        Assert.False(await _factory.QueryAsync(db => db.Categories.AnyAsync(c => c.Id == other.Id, Ct)));
+    }
+
+    [Fact]
+    public async Task Same_batch_with_other_whitespace_gets_the_saved_answer()
+    {
+        var batchId = Guid.NewGuid();
+        var category = NewCategory();
+        var client = _factory.PushClient(await _factory.SignInAsync(Role.Member));
+        var first = await client.PushAsync(Body(batchId, ("category", Wire(category))));
+
+        var indented = Body(batchId, ("category", Wire(category))).ToJsonString(new System.Text.Json.JsonSerializerOptions { WriteIndented = true });
+        using var content = new StringContent(indented, System.Text.Encoding.UTF8, "application/json");
+        using var response = await client.PostAsync("/api/v1/sync/push", content, Ct);
+
+        Assert.Equal(HttpStatusCode.OK, response.StatusCode);
+        Assert.Equal(first.Text, await response.Content.ReadAsStringAsync(Ct));
     }
 
     [Fact]
@@ -360,6 +394,22 @@ public sealed class SyncPushTests(PostgresFixture pg) : IDisposable
         var result = answer.Result("stock_review", second.Id);
         Assert.Equal("rejected", (string?)result["status"]);
         Assert.Equal("review-open", (string?)result["reason"]);
+    }
+
+    [Fact]
+    public async Task Database_allows_one_open_review_per_location()
+    {
+        var location = NewLocation();
+        StockReview Review(string status, long? deletedAt = null) => new()
+        {
+            Id = Guid.NewGuid(), LocationId = location.Id, Status = status, DeletedAt = deletedAt, StartedAt = 1, CreatedAt = 1, UpdatedAt = 1,
+        };
+        // Finished, cancelled and deleted open reviews do not count.
+        await _factory.SeedAsync(location, Review("open"), Review("finished"), Review("cancelled"), Review("open", deletedAt: 5));
+
+        var e = await Assert.ThrowsAsync<DbUpdateException>(() => _factory.SeedAsync(Review("open")));
+        var pgError = Assert.IsType<Npgsql.PostgresException>(e.InnerException);
+        Assert.Equal("ux_stock_review_location_id_open", pgError.ConstraintName);
     }
 
     // ---- First change wins ----
@@ -564,6 +614,24 @@ public sealed class SyncPushTests(PostgresFixture pg) : IDisposable
     }
 
     [Fact]
+    public async Task Merged_attribute_redirects_links_of_later_batches()
+    {
+        var (category, other) = (NewCategory(), NewCategory());
+        var server = NewAttribute();
+        await _factory.SeedAsync(category, other, server);
+        var phone = NewAttribute();
+        phone.Key = server.Key;
+        var client = _factory.PushClient(await _factory.SignInAsync(Role.Admin));
+        await client.PushAsync(("attribute_definition", Wire(phone)));
+        var link = new CategoryAttribute { Id = Guid.NewGuid(), CategoryId = other.Id, AttributeId = phone.Id, CreatedAt = 1, UpdatedAt = 1 };
+
+        var answer = await client.PushAsync(("category_attribute", Wire(link)));
+
+        Assert.Equal("accepted", (string?)answer.Result("category_attribute", link.Id)["status"]);
+        Assert.Equal(server.Id, (await Row<CategoryAttribute>(link.Id)).AttributeId);
+    }
+
+    [Fact]
     public async Task Attribute_key_never_changes()
     {
         var attribute = NewAttribute();
@@ -648,10 +716,34 @@ public sealed class SyncPushTests(PostgresFixture pg) : IDisposable
     public async Task Serial_and_archived_articles_never_alert(string tracking, bool archived)
     {
         var (article, location) = await StockedAsync(threshold: 5000, stock: 6000, tracking, archived);
-        await _factory.PushClient(await _factory.SignInAsync(Role.Member)).PushAsync(
-            ("stock_movement", Wire(NewMovement(article, location, -3000, "consumption"))));
+        var movement = NewMovement(article, location, -3000, "consumption");
+        var answer = await _factory.PushClient(await _factory.SignInAsync(Role.Member)).PushAsync(("stock_movement", Wire(movement)));
 
+        Assert.Equal(HttpStatusCode.OK, answer.Status);
+        Assert.Equal("accepted", (string?)answer.Result("stock_movement", movement.Id)["status"]);
         Assert.Empty(await AlertsAsync(article.Id));
+    }
+
+    [Theory]
+    [InlineData("archived", true)]
+    [InlineData("threshold", null)]
+    public async Task State_of_an_article_that_stops_qualifying_is_removed_and_it_can_alert_again(string field, object? value)
+    {
+        var (article, location) = await StockedAsync(threshold: 5000, stock: 6000);
+        var client = _factory.PushClient(await _factory.SignInAsync(Role.Member));
+        var drop = NewMovement(article, location, -2000, "consumption");
+        var low = await client.PushAsync(("stock_movement", Wire(drop)));
+        Assert.Equal("accepted", (string?)low.Result("stock_movement", drop.Id)["status"]);
+        Assert.Single(await AlertsAsync(article.Id));
+        Assert.True(await _factory.QueryAsync(db => db.Set<LowStockState>().AnyAsync(s => s.ArticleId == article.Id && s.IsLow, Ct)));
+
+        var row = Edit(article);
+        row[field] = value is null ? null : JsonValue.Create(value);
+        var edit = await client.PushAsync(("article", row));
+
+        Assert.Equal("accepted", (string?)edit.Result("article", article.Id)["status"]);
+        Assert.False(await _factory.QueryAsync(db => db.Set<LowStockState>().AnyAsync(s => s.ArticleId == article.Id, Ct)));
+        Assert.Single(await AlertsAsync(article.Id)); // stopping to qualify is not an alert
     }
 
     [Fact]
@@ -671,7 +763,7 @@ public sealed class SyncPushTests(PostgresFixture pg) : IDisposable
     // ---- Foreign keys ----
 
     [Fact]
-    public async Task Guest_logout_still_deletes_the_guest_with_its_sync_batches()
+    public async Task Guest_logout_soft_deletes_the_guest_and_keeps_its_sync_batches()
     {
         var guest = await _factory.SignInAsync(Role.Guest);
         var batchId = Guid.NewGuid();
@@ -690,8 +782,25 @@ public sealed class SyncPushTests(PostgresFixture pg) : IDisposable
         Assert.Equal(HttpStatusCode.NoContent, logout.StatusCode);
         await _factory.WithDb(async db =>
         {
-            Assert.False(await db.Users.AnyAsync(u => u.Id == guest.UserId, Ct));
-            Assert.False(await db.Set<SyncBatch>().AnyAsync(b => b.BatchId == batchId, Ct));
+            Assert.NotNull(await db.Users.Where(u => u.Id == guest.UserId).Select(u => u.DeletedAt).SingleAsync(Ct));
+            // The row stays for replay protection until the sync_batch retention removes it.
+            Assert.True(await db.Set<SyncBatch>().AnyAsync(b => b.BatchId == batchId, Ct));
         });
+    }
+
+    [Fact]
+    public async Task Alert_keeps_the_soft_deleted_guest_who_caused_it_and_needs_a_real_one()
+    {
+        var guest = await _factory.SignInAsync(Role.Guest);
+        var article = NewArticle(threshold: 1000);
+        LowStockAlert Alert(Guid? user) => new() { Id = Guid.NewGuid(), ArticleId = article.Id, CrossedAt = 1, Stock = 0, CausedByUserId = user };
+        var alert = Alert(guest.UserId);
+        await _factory.SeedAsync(article, alert);
+
+        await _factory.ClientFor(guest).PostAsync("/api/v1/auth/logout", null, Ct);
+
+        // Guest logout is a soft delete, so the FK's SET NULL does not fire and the alert keeps its cause.
+        Assert.Equal(guest.UserId, await _factory.QueryAsync(db => db.Set<LowStockAlert>().Where(a => a.Id == alert.Id).Select(a => a.CausedByUserId).SingleAsync(Ct)));
+        await Assert.ThrowsAsync<DbUpdateException>(() => _factory.SeedAsync(Alert(Guid.NewGuid())));
     }
 }

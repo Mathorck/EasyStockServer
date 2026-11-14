@@ -83,8 +83,15 @@ public sealed partial class PromotionHandler(
     {
         var now = time.GetUtcNow();
         await using var tx = await db.Database.BeginTransactionAsync(ct);
-        var user = await users.FindByIdAsync(userId.ToString());
-        var promotion = await db.Promotions.SingleOrDefaultAsync(p => p.UserId == userId && p.EndedAt == null, ct);
+        // Same lock order as Create (user, then promotion). The promotion row lock makes a concurrent Cancel (or a
+        // replacing Create) wait for this transaction, or makes this one wait and then see the row as ended: a
+        // promotion cancelled a moment ago is never completed.
+        var user = (await db.Users.FromSql($"SELECT * FROM users WHERE id = {userId} FOR UPDATE").ToListAsync(ct))
+            .SingleOrDefault(u => u.DeletedAt is null);
+        var promotion = (await db.Promotions
+                .FromSql($"SELECT * FROM promotion WHERE user_id = {userId} AND ended_at IS NULL FOR UPDATE")
+                .ToListAsync(ct))
+            .SingleOrDefault();
         if (user is null || user.Kind != UserKind.Guest || promotion is null)
             throw ProblemException.Of(StatusCodes.Status404NotFound, ProblemTypesHelper.NoPromotion);
         if (promotion.ExpiresAt <= now)
@@ -104,6 +111,8 @@ public sealed partial class PromotionHandler(
         promotion.EndedAt = now;
         promotion.EndReason = Promotion.Completed;
         await db.SaveChangesAsync(ct);
+        // The phones hold a Guest-filtered copy: they pull everything again (FullPullMarkHelper).
+        await FullPullMarkHelper.MarkUserSessionsAsync(db, userId, ct);
         var refresh = await sessions.RotateAsync(sessionId, ct);
         await tx.CommitAsync(ct);
         LogCompleted(log, userId, user.Role.ToWire());

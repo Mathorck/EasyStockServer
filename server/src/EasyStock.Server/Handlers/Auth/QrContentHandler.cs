@@ -21,7 +21,7 @@ public sealed class QrContentHandler(IOptions<ServerOptions> options)
         var o = options.Value;
         var link = $"easystock://{kind}?server={Uri.EscapeDataString(o.PublicUrl)}&token={Uri.EscapeDataString(token)}";
         if (o.CertFingerprint is { } fp)
-            link += $"&fp={fp.Replace(":", "").Replace(" ", "").ToLowerInvariant()}";
+            link += $"&fp={Uri.EscapeDataString(fp.Replace(":", "").Replace(" ", "").ToLowerInvariant())}";
         return link;
     }
 

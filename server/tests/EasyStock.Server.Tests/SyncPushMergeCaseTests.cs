@@ -26,9 +26,13 @@ public sealed class SyncPushMergeCaseTests(PostgresFixture pg)
             + "processing). See SyncPushTests.Stale_edit_is_rejected_with_the_server_row_and_wins_when_pushed_again_from_it.",
     };
 
+    private const string AppMissing = "(app repository absent)";
+
     public static TheoryData<string> Cases()
     {
-        var dir = Path.Combine(Path.GetDirectoryName(SchemaDriftTests.FindAppFile("docs/schema.dbml"))!, "test-cases", "merge");
+        var schema = SchemaDriftTests.TryFindAppFile("docs/schema.dbml");
+        if (schema == null) return new TheoryData<string>(AppMissing); // discovery must not throw; Merge_case skips
+        var dir = Path.Combine(Path.GetDirectoryName(schema)!, "test-cases", "merge");
         return new TheoryData<string>(Directory.GetFiles(dir, "*.json").Select(Path.GetFileNameWithoutExtension).Order()!);
     }
 
@@ -36,19 +40,13 @@ public sealed class SyncPushMergeCaseTests(PostgresFixture pg)
     [MemberData(nameof(Cases))]
     public async Task Merge_case(string name)
     {
+        if (name == AppMissing) Assert.Skip("App repository not found: put it next to this repository as ../EasyStock or set EASYSTOCK_APP_DIR.");
         if (NotForPush.TryGetValue(name, out var reason)) Assert.Skip(reason);
         var ct = TestContext.Current.CancellationToken;
         var test = JsonNode.Parse(await File.ReadAllTextAsync(SchemaDriftTests.FindAppFile($"docs/test-cases/merge/{name}.json"), ct))!;
         var ids = new IdMap();
 
-        var database = $"merge_{Guid.NewGuid():N}";
-        await using (var admin = new NpgsqlConnection(pg.ConnectionString))
-        {
-            await admin.OpenAsync(ct);
-            await using var create = new NpgsqlCommand($"CREATE DATABASE {database}", admin);
-            await create.ExecuteNonQueryAsync(ct);
-        }
-        var cs = new NpgsqlConnectionStringBuilder(pg.ConnectionString) { Database = database }.ConnectionString;
+        var cs = await pg.CreateDatabaseAsync();
         using var factory = new ApiFactory(cs);
         factory.CreateClient(); // migrates the database
 

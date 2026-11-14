@@ -1,6 +1,20 @@
-# EasyStock Server: implementation plan (.NET 10 / ASP.NET Core minimal API / EF Core + Npgsql / PostgreSQL)
+# EasyStock Server: implementation plan (.NET 10 / ASP.NET Core MVC controllers / EF Core + Npgsql / PostgreSQL)
 
-The plan is built from `docs/03-server-spec.md` alone (362 lines). It has five parts: blockers, decisions, phased plan, technical design notes, and risks/effort.
+The plan was built from `docs/03-server-spec.md` alone. It has five parts: ground rules, assumptions and decisions, the phased plan, technical design notes, and risks/effort.
+
+**Status note.** This is the original plan, kept for its decisions. The server is built, and its code differs from the plan in a few places. Where they differ, the code and `docs/03-server-spec.md` win. Items that are not built yet are marked **Not yet done**.
+
+| Planned in this document | In the code (`server/src/EasyStock.Server/`) |
+|---|---|
+| Minimal API, `Endpoints/*.cs` | MVC controllers in `Controllers/` |
+| `Infrastructure/` | `Configuration/` (options, logging, rate limiting, forwarded headers, version header, Problem Details), plus `Helpers/` |
+| `Data/` | `DB/` (`EasyStockDbContext`, `DatabaseMigrator`, `ServerSeq`, `Entities/`, `Configurations/`, `Migrations/`) |
+| `Auth/*Service.cs`, `Sync/PushProcessor.cs`, `Sync/PullBuilder.cs`, `Alerts/`, `Backup/*` | Injected classes named `*Handler` in `Handlers/<Area>/`, for example `Handlers/Sync/PushHandler.cs` and `Handlers/Backup/BackupImportHandler.cs` |
+| Static logic (`ConflictRules`, `GuestFilter`, `ShortCode`, `PushPermissions`, ...) | Static classes named `*Helper` in `Helpers/` (`ConflictTypesHelper`, `PullGuestFilterHelper`, `ShortCodeHelper`, `PushPermissionsHelper`, ...) |
+| `Permissions.cs` with `Role` and `Permission` | `Enums/Role.cs`, `Enums/Permission.cs`, `Helpers/PermissionsHelper.cs` |
+| `Sync/Dtos/` | `Models/` |
+| Interfaces next to their class | `Interfaces/` |
+
 
 ---
 
@@ -28,8 +42,8 @@ The plan is built from `docs/03-server-spec.md` alone (362 lines). It has five p
 | `docs/schema.dbml` | Shared-table entities and migrations; DTO field names; max lengths used by the suffix logic; validation | Do every phase that doesn't touch shared tables first. Then write placeholder entities derived from the spec (see 1.3), marked `// PLACEHOLDER-DBML`. Once the real dbml arrives, add a schema drift test: a small dbml parser compares tables, columns, types, nullability and unique indexes against the EF model. |
 | `docs/test-cases/merge/*.json` | Conflict-rule verification | Write C# conflict rules from the spec's prose. Run them against stub fixtures in the proposed format (1.4), stored under `server/tests/.../Fixtures/merge-stub/` so they never pass for the real set. Swap in the real directory once it exists. |
 | App `BackupMerge` (Kotlin) | Exact suffix formats (SKU, serial), truncation, ATTRIBUTE_MERGED semantics, rule order | Implement rules behind a pure `ConflictRules` class with one method per rule. Assume the `" (n)"` suffix for every renamed value, cutting the base so that base plus suffix fits the column maximum. Re-verify line by line against the Kotlin code. |
-| App `Permissions` object | Exact role × operation matrix | Encode the spec's role prose (section 1.3 of the matrix below). **Recommendation:** add a shared fixture `docs/test-cases/permissions.json` (role → list of permission names). Both the Kotlin and the C# tests assert their object equals it, which removes drift for good. |
-| App `@SerialName` values and enum string values | JSON names in push and pull | Use camelCase forms of the dbml column names (the spec examples are consistent with this: `articleId`, `occurredAt`). Keep all names in `Sync/Dtos/`, so a rename touches one folder. |
+| App `Permissions` object | Exact role × operation matrix | Encode the spec's role prose (see Phase 5 and 1.2 #23). **Recommendation (not yet done, no such fixture exists):** add a shared fixture `docs/test-cases/permissions.json` (role → list of permission names). Both the Kotlin and the C# tests assert their object equals it, which removes drift for good. |
+| App `@SerialName` values and enum string values | JSON names in push and pull | Use camelCase forms of the dbml column names (the spec examples are consistent with this: `articleId`, `occurredAt`). Keep all names in `Models/`, so a rename touches one folder. |
 | App version numbers, schema versions | `server-info` and the 426 check | Use constants in `Helpers/CompatHelper.cs`: `MinAppVersion = "0.0.0"` placeholder and `SupportedSchemaVersions = [10, 11]` (the app DB versions whose shared tables the server matches; backups import up to the highest and export the lowest). Bump them in the same PR that changes the protocol. |
 | QR content formats (setup, invite, public, reset) | Auth endpoint answers, setup log | Proposed below, to confirm with `02-app-changes.md`. |
 | App backup file format | `GET/POST /admin/backup` | Phase 11 is blocked. Design the service boundary now; implement once the format is known. |
@@ -104,8 +118,7 @@ The plan is built from `docs/03-server-spec.md` alone (362 lines). It has five p
     - Identical content means `accepted`, a no-op.
     - Different content means `changed` with `MOVEMENT_KEPT` and the server row in the answer.
 18. **Refresh retry race.** A phone that loses the network after the server rotated retries with the old token, and the spec says that revokes the session.
-    - **Decision:** follow the spec strictly by default, and put this to the owner as an explicit open question.
-    - Optional alternative behind a constant: a 60 s grace in which presenting the previous token re-rotates instead of revoking.
+    - **Decision:** a 10 s grace (`AuthLimitsHelper.RefreshReuseGrace`) in which presenting the previous token returns the current refresh token again, without rotating or revoking. The next token is derived from the old hash, so it is rebuilt rather than stored.
 19. **`complete-promotion` authentication.**
     - **Decision:** it requires the Guest's Bearer token (the pending promotion belongs to that user).
     - It returns a full token answer, because the role claim changes. Rotate the refresh token on the same session.
@@ -133,8 +146,8 @@ The plan is built from `docs/03-server-spec.md` alone (362 lines). It has five p
 26. **Problem `type` format.** **Decision:** the bare slug (`"type": "session-revoked"`). That is a valid relative URI reference per RFC 9457 and matches the spec examples. Never change a slug once shipped.
 27. **Guest or Viewer calling `/sync/push`.** **Decision:** 403 `not-allowed` for the whole request, no per-row results.
 28. **Lockout and disabled responses.**
-    - Locked: 401 `account-locked` with `retryAfter`.
-    - Wrong password: 401 `invalid-credentials`.
+    - Login: wrong password, unknown user and locked account all give 401 `invalid-credentials`, so the answer never tells whether an account exists (`account-locked` is no longer sent by login).
+    - `POST /me/password` shares the lockout; while locked it gives 429 `rate-limited` with `retryAfter`.
     - Disabled: 401 `account-disabled`, revealed only after a correct password.
 29. **"Whether the server holds data"** (`server-info`) means at least one row in `article`, `category` or `location`.
 30. **Imported historical movements.** **Decision:** `created_by` and `device_id` are null (unknown author), not the importing Admin.
@@ -195,9 +208,9 @@ The build order deviates from the suggested one, on purpose. Everything not bloc
 
 **Files**
 - `server/EasyStock.Server.slnx`, `global.json`, `Directory.Build.props`, `Directory.Packages.props`, `.editorconfig`, `.gitignore`
-- `server/docker-compose.dev.yml` (PostgreSQL only, for local runs)
+- `server/docker-compose.dev.yml` (PostgreSQL only, for local runs). **Not yet done:** there is no such file.
 - `src/EasyStock.Server/Program.cs`. Keep it thin: `builder.AddEasyStock()` / `app.UseEasyStock()` extension methods.
-- `src/EasyStock.Server/Infrastructure/`:
+- `src/EasyStock.Server/Configuration/` (planned as `Infrastructure/`; some of these files ended up in `Helpers/`):
   - `ServerOptions.cs`: binds `EASYSTOCK_*` and validates at start (fail fast when `EASYSTOCK_DB` or `EASYSTOCK_PUBLIC_URL` is missing, or `PUBLIC_URL` is not absolute).
   - `ProblemTypesHelper.cs`: the catalogue, see 3.6.
   - `Problems.cs`: helpers returning `TypedResults.Problem` with a stable `type`.
@@ -206,8 +219,8 @@ The build order deviates from the suggested one, on purpose. Everything not bloc
   - `Json.cs`: `JsonSerializerDefaults.Web`, camelCase properties, `DictionaryKeyPolicy = null` so table-name keys stay snake_case, string enums with an explicit naming policy.
   - `HealthCheck.cs`: `AddHealthChecks().AddDbContextCheck<>()` at `/health`, plus a `--healthcheck` CLI mode for Docker (Phase 12).
   - `Logging.cs`: level from `EASYSTOCK_LOG_LEVEL`; `Microsoft.EntityFrameworkCore.Database.Command` at Warning; `EnableSensitiveDataLogging` never on.
-- `src/EasyStock.Server/Endpoints/ServerInfoEndpoints.cs`
-- `tests/EasyStock.Server.Tests/Infrastructure/`:
+- `src/EasyStock.Server/Controllers/ServerInfoController.cs` (planned as `Endpoints/ServerInfoEndpoints.cs`)
+- `tests/EasyStock.Server.Tests/Infrastructure/` (the real folder has `ApiFactory.cs`, `PostgresFixture.cs`, `AuthHelpers.cs`, `LogCapture.cs`, `SyncPushKit.cs`; the other names below are the plan's):
   - `PostgresFixture.cs`: one Testcontainers PostgreSQL 16 per test run, shared as an xUnit assembly fixture.
   - `ApiFactory.cs`: `WebApplicationFactory<Program>` that overrides env vars, replaces `TimeProvider` with `FakeTimeProvider`, and uses a temp `EASYSTOCK_DATA_DIR`.
   - `DbReset.cs`: Respawn between tests, keeping `__EFMigrationsHistory`.
@@ -224,12 +237,12 @@ The build order deviates from the suggested one, on purpose. Everything not bloc
 **Goals:** `EasyStockDbContext` (snake_case naming) with all server-only tables, the global sequence, the advisory lock helper, and auto-migration at start.
 
 **Files**
-- `Data/EasyStockDbContext.cs`: `IdentityUserContext<AppUser, Guid>`. No role tables; the role is a column. Ignore or strip unused Identity columns: email, phone, two-factor, and `AccessFailedCount`/`Lockout*` kept.
-- `Data/Entities/`: `AppUser.cs` (users), `DeviceSession.cs`, `Invite.cs`, `PublicInvite.cs`, `Promotion.cs`, `PasswordReset.cs`, `SyncBatch.cs`, `LowStockAlert.cs`, `LowStockState.cs`, `PushRegistration.cs`, `ImageRecord.cs`, `Setting.cs`, `SetupState.cs`, `AttributeAlias.cs`
-- `Data/Configurations/*.cs`: one `IEntityTypeConfiguration` per entity; table names exactly as in the spec (`users`, `device_session`, …)
-- `Data/ServerSeq.cs`: sequence name, lock key constant, `AcquireSyncLockAsync(tx)`
-- `Data/Migrations/` (`Initial`, plus a hand-written SQL migration for the sequence and triggers)
-- `Data/MigrationRunner.cs`: `MigrateAsync()` at start (EF 9+ takes its own migration lock)
+- `DB/EasyStockDbContext.cs`: `IdentityUserContext<AppUser, Guid>`. No role tables; the role is a column. Ignore or strip unused Identity columns: email, phone, two-factor, and `AccessFailedCount`/`Lockout*` kept.
+- `DB/Entities/`: `AppUser.cs` (users), `DeviceSession.cs`, `Invite.cs`, `PublicInvite.cs`, `Promotion.cs`, `PasswordReset.cs`, `SyncBatch.cs`, `LowStockAlert.cs`, `LowStockState.cs`, `PushRegistration.cs`, `ImageRecord.cs`, `Setting.cs`, `SetupState.cs`, `AttributeAlias.cs`
+- `DB/Configurations/*.cs`: one `IEntityTypeConfiguration` per entity; table names exactly as in the spec (`users`, `device_session`, …)
+- `DB/ServerSeq.cs`: sequence name, lock key constant, `AcquireSyncLockAsync(tx)`
+- `DB/Migrations/` (`Initial`, plus a hand-written SQL migration for the sequence and triggers)
+- `DB/DatabaseMigrator.cs`: `MigrateAsync()` at start (EF 9+ takes its own migration lock)
 
 **Key decisions**
 - `users`:
@@ -274,9 +287,10 @@ The build order deviates from the suggested one, on purpose. Everything not bloc
   - `CheckPasswordSignInAsync(user, pw, lockoutOnFailure: true)`.
   - Guests and tombstones have no username, so a lookup fails as `invalid-credentials`.
   - Run a dummy hash on unknown users to keep timing equal.
-- Refresh (strict, per spec), three outcomes:
+- Refresh, outcomes:
   - Hash matches `refresh_token_hash` on a live session: rotate (previous ← current, current ← new) and update `last_used_at`.
-  - Hash matches `previous_token_hash`: revoke with reason `token-reuse`, answer 401 `session-revoked`.
+  - Hash matches `previous_token_hash` within the 10 s grace: answer the current token again (no write).
+  - Any other token of the session (previous after the grace, or older): revoke with reason `token-reuse`, answer 401 `session-revoked`.
   - Revoked session, or `last_used_at` more than 90 days ago: 401 `session-revoked`.
 - Logout: revoke the current session. For a Guest, hard-delete the user (cascade sessions, push registration, promotions).
 - `last_seen_at`/`last_used_at` writes are throttled: only written when older than 5 minutes.
@@ -320,7 +334,7 @@ The build order deviates from the suggested one, on purpose. Everything not bloc
   - `complete-promotion` requires Bearer, the caller must be that Guest, and the promotion must be open and not expired (otherwise 410 `promotion-expired` or 404 `no-promotion`).
   - It validates username and password, then sets username, hash, `kind=full` and role, ends the promotion as `completed`, rotates the refresh token on the same session, and returns a token answer.
 - `PATCH /me`: `displayName` (1–50, trimmed) and `alertsEnabled` (bool or null). It bumps `users.server_seq` through the trigger. Guests may change their display name only.
-- `POST /me/password`: full accounts only. Wrong current password gives 400 `invalid-credentials`. Other sessions are revoked, the current one kept.
+- `POST /me/password`: full accounts only. Wrong current password gives 400 `invalid-credentials` and counts toward the login lockout (429 `rate-limited` while locked). Other sessions are revoked, the current one kept.
 
 **Tests:** the spec's Guest and Promotion test lists, plus expired and reused invites, reset revoking old sessions, and Me changes.
 
@@ -329,23 +343,18 @@ The build order deviates from the suggested one, on purpose. Everything not bloc
 ### Phase 5: Roles, `Permissions.cs`, Admin user, device, invite, public-invite and settings endpoints (M)
 
 **Files**
-- `src/EasyStock.Server/Permissions.cs`:
+- `Enums/Role.cs`, `Enums/Permission.cs`, `Helpers/PermissionsHelper.cs` (planned as one `Permissions.cs`). The enums are the app's own, in the app's order:
 
   ```csharp
   public enum Role { Admin, Member, Viewer, Guest }
-  public enum Permission { /* read */ ReadStock, ReadMovementsFull, ReadReviews, ReceiveAlerts,
-    /* sync writes */ CreateMovement, CreateArticle, EditArticle, ArchiveArticle, SoftDeleteArticle, RestoreArticle,
-    CreateItem, EditItem, SoftDeleteItem, SetTag, CreateCategory, EditCategory, DeleteCategory,
-    CreateAttribute, EditAttribute, DeleteAttribute, EditCategoryAttribute,
-    CreateLocation, EditLocation, ReparentLocation, SoftDeleteLocation,
-    CreateReview, EditReview,
-    /* other */ UploadImage, ManageUsers, ManageInvites, ManagePublicInvite, ManageDevices, ManageBackups, ManageSettings }
-  public static class Permissions { public static bool Has(Role r, Permission p); public static IReadOnlySet<Permission> For(Role r); }
+  public enum Permission { ViewStock, ViewHistory, ViewReviews, StockAction, Edit, Delete, LinkTag, RunReview,
+    ManageSettings, PushChanges, ReceiveAlerts, Administer }
+  public static class Permissions { public static bool Has(this Role r, Permission p); ... }
   ```
 
-  Names mirror the Kotlin object once it is known. Assert against `docs/test-cases/permissions.json`.
-- `Auth/Policies.cs`: endpoint filter `.RequirePermission(Permission.X)`, which reads the role from `ICurrentUser`, the DB-backed role (not the claim).
-- `Endpoints/AdminEndpoints.cs` (partial-class files `AdminEndpoints.Users.cs`, `.Devices.cs`, `.Invites.cs`, `.PublicInvite.cs`, `.Settings.cs` are fine if "one file" gets too long):
+  The names mirror the app's `Action` enum. `PermissionsDriftTests` checks them against the app repository. The shared fixture `docs/test-cases/permissions.json` is **not yet done**: no such file exists.
+- `Filters/RequirePermissionAttribute.cs`: `[RequirePermission(Permission.X)]` on controller actions, which reads the role from `ICurrentUser`, the DB-backed role (not the claim).
+- `Controllers/AdminUsersController.cs`, `AdminDevicesController.cs`, `AdminInvitesController.cs`, `AdminPublicInviteController.cs`, `AdminSettingsController.cs` (planned as one `Endpoints/AdminEndpoints.cs`):
   - users list, patch, delete, reset, promote, unpromote
   - devices list and revoke
   - invites create, list, delete
@@ -368,13 +377,13 @@ The build order deviates from the suggested one, on purpose. Everything not bloc
 
 ### Phase 6: Images (S)
 
-**Files:** `Images/ImageStore.cs`, a small helper folder (not in the spec layout, acceptable), and `Endpoints/ImagesEndpoints.cs`.
+**Files:** `Handlers/Images/ImageHandler.cs`, `Helpers/ImagesHelper.cs` and `Controllers/ImagesController.cs`.
 
 **Decisions**
 - Path: `${DATA_DIR}/images/ab/cd/<sha256>.jpg` (lowercase hex). The route constraint checks 64 hex characters.
 - `PUT`:
   - Requires `UploadImage` (Member and Admin). The body limit is 5 MB through `IHttpMaxRequestBodySizeFeature`, with 413 `image-too-large` above it.
-  - `Content-Type: image/jpeg`, otherwise 415 `unsupported-media-type`.
+  - `Content-Type: image/jpeg`, otherwise 415 `unsupported-media-type`. A body without the JPEG magic bytes gets 400 `not-a-jpeg`.
   - Stream to a temp file in the same folder while hashing with `IncrementalHash`. Check the `FF D8 FF` magic bytes. A hash different from the URL gives 400 `hash-mismatch`.
   - `File.Move` atomically, then insert the row `ON CONFLICT DO NOTHING`. A second identical upload answers 200 (idempotent); a new one answers 201.
 - `GET`: any authenticated role. `Results.File` with `Cache-Control: private, max-age=31536000, immutable` and `ETag: "<sha>"`; honour `If-None-Match`.
@@ -387,7 +396,7 @@ The build order deviates from the suggested one, on purpose. Everything not bloc
 
 ### Phase 7: Shared tables data model (M, BLOCKED on `schema.dbml`; start with the placeholders from 1.3)
 
-**Files:** `Data/Entities/Shared/*.cs` (nine entities), `Data/Configurations/Shared/*.cs`, a new migration, and `Sync/TableRegistry.cs` (table name → entity type, DTO type, dependency order, soft-delete column, unique columns, max lengths).
+**Files:** `DB/Entities/SharedEntities.cs` (nine entities), `DB/Configurations/`, a new migration, and the table registries in `Helpers/` (`PushTablesHelper`, `PullTablesHelper`, `BackupTablesHelper`) (table name → entity type, DTO type, dependency order, soft-delete column, unique columns, max lengths).
 
 **Decisions**
 - Column names follow the dbml through snake_case naming. `article.image_path` becomes `image_sha256`.
@@ -397,7 +406,7 @@ The build order deviates from the suggested one, on purpose. Everything not bloc
 - Indexes on `server_seq` for every table; `stock_movement(article_id)` for `SUM`.
 - FKs between shared tables are real but not cascading. The cross-table NFC-tag uniqueness (article vs location) is enforced in code under the sync lock.
 - Triggers (hand-written SQL migration) on every shared table, plus `low_stock_alert`, plus `users` (with a column `WHEN` condition): `BEFORE INSERT OR UPDATE … NEW.server_seq := nextval('server_seq'); PERFORM pg_advisory_xact_lock(<SYNC_KEY>);`. See 3.1. EF maps `server_seq` as `ValueGeneratedOnAddOrUpdate`.
-- `Sync/Dtos/*.cs`: one record per table with app field names. Mappers stay explicit, no AutoMapper.
+- `Models/`: one record per table with app field names. Mappers stay explicit, no AutoMapper.
 
 **Tests:**
 - Migration applies.
@@ -409,14 +418,14 @@ The build order deviates from the suggested one, on purpose. Everything not bloc
 ### Phase 8: Sync push and pull, conflict rules, Guest filter (L, the biggest phase; partly blocked on BackupMerge and the test cases)
 
 **Files**
-- `Sync/PushProcessor.cs`: orchestration (3.1, 3.2)
-- `Sync/RowOperationClassifier.cs`: compares the incoming DTO with the stored entity and returns the set of operations {Create, Edit, Archive, Unarchive, SoftDelete, Restore, Reparent, SetTag}
+- `Handlers/Sync/PushHandler.cs` (planned as `Sync/PushProcessor.cs`): orchestration (3.1, 3.2)
+- `Sync/RowOperationClassifier.cs` (planned; the code splits this across `Helpers/Push*Helper.cs`): compares the incoming DTO with the stored entity and returns the set of operations {Create, Edit, Archive, Unarchive, SoftDelete, Restore, Reparent, SetTag}
 - `Sync/PushPermissions.cs`: (table, operation) → `Permission`. A row needs every permission for its operations.
 - `Sync/RowValidator.cs`: enums, lengths, quantity rules, required references
 - `Sync/ConflictRules.cs`: a port of BackupMerge. Pure functions over an `IConflictLookup` (DB-backed in production, in-memory in unit tests). One method per code: `CATEGORY_RENAMED`, `SKU_RENAMED`, `BARCODE_CLEARED`, `SERIAL_RENAMED`, `ATTRIBUTE_MERGED`, `CATEGORY_ATTRIBUTE_SKIPPED`, `LOCATION_PARENT_KEPT`, `MOVEMENT_KEPT`, `ATTRIBUTE_KEY_KEPT`. Plus `Suffix.Apply(base, n, maxLen)`.
-- `Sync/PullBuilder.cs`, `Sync/GuestFilter.cs`
-- `Sync/Dtos/PushRequest.cs`, `PushResult.cs`, `PullResponse.cs`
-- `Endpoints/SyncEndpoints.cs`
+- `Handlers/Sync/PullHandler.cs` and `Helpers/PullGuestFilterHelper.cs` (planned as `Sync/PullBuilder.cs`, `Sync/GuestFilter.cs`)
+- `Models/SyncPush.cs`, `Models/SyncPullResponse.cs`
+- `Controllers/SyncPushController.cs`, `Controllers/SyncPullController.cs`
 
 **Push algorithm (per request)**
 1. Endpoint filter: a role without any sync write permission (Guest, Viewer) gets 403 `not-allowed`. Body limit 10 MB, at most 5000 rows, otherwise 413 `batch-too-large`.
@@ -440,11 +449,11 @@ The build order deviates from the suggested one, on purpose. Everything not bloc
      9. `CreateSavepoint`, `SaveChanges`, `ChangeTracker.Clear()`. On a `DbUpdateException`, `RollbackToSavepoint` and reject `conflict` with the server row. This is a backstop; the pre-checks should catch everything.
 6. Collect touched articles (movements, threshold, tracking or archive changes). Run `LowStockDetector` (Phase 9) in the same transaction.
 7. Insert `sync_batch` with the response, then commit.
-8. After commit: enqueue alert pushes and catalogue pushes (Phase 9).
+8. After commit: enqueue alert pushes and catalogue pushes (Phase 9). **Not yet done:** the push sender does not exist, so nothing is enqueued.
 
 **Pull algorithm:** see 3.1.
 
-**Guest filter:** `GuestFilter.Apply(PullResponse)` is the only place.
+**Guest filter:** `PullGuestFilterHelper` (planned as `GuestFilter.Apply(PullResponse)`) is the only place.
 - Movements lose `createdBy`, `deviceId` and `comment` (set to null, and omitted with `JsonIgnoreCondition.WhenWritingNull` on a Guest-specific DTO projection).
 - `stock_review` and `stock_review_line` keys are removed.
 - `users` and `alerts` are empty.
@@ -464,7 +473,7 @@ The build order deviates from the suggested one, on purpose. Everything not bloc
 
 ### Phase 9: Low-stock alerts and push sending (M)
 
-**Files:** `Alerts/LowStockDetector.cs`, `Alerts/AlertRecipients.cs`, `Alerts/PushQueue.cs` (bounded `Channel<PushJob>`), `Alerts/PushSender.cs` (`BackgroundService` plus typed `HttpClient`), `Endpoints/PushEndpoints.cs`.
+**Files:** `Handlers/Sync/LowStockHandler.cs` (the detector, planned as `Alerts/LowStockDetector.cs`), `Helpers/AlertRecipientsHelper.cs` and `Controllers/PushController.cs` (`POST`/`DELETE /push/register`) exist. **Not yet done:** `PushQueue` (bounded `Channel<PushJob>`) and `PushSender` (`BackgroundService` plus typed `HttpClient`). No `sync` push is sent yet, whatever the trigger below. `BackupImportHooksHandler.AfterCommitAsync` is the hook waiting for it.
 
 **Detector (inside the push transaction, after the rows are applied)**
 - For touched article IDs, `SELECT a.id, a.low_stock_threshold, COALESCE(SUM(m.quantity),0) … GROUP BY a.id`.
@@ -476,13 +485,13 @@ The build order deviates from the suggested one, on purpose. Everything not bloc
 - Evaluated once per batch, so "under and back within one batch" alerts nothing.
 - Note: setting a threshold on an article that is already low alerts once (defined behaviour).
 
-**Recipients** (`AlertRecipients.IsRecipient(user)`, reused by pull and push):
+**Recipients** (`AlertRecipientsHelper`, reused by pull and, later, push):
 - Role admin or member: `alerts_enabled ?? true`.
 - Viewer: `alerts_enabled ?? false`.
 - Guest: never.
 - The cause is excluded.
 
-**Push sending**
+**Push sending** (**Not yet done**, see the files above)
 - The endpoint allowlist is described in 1.2 #31.
 - `POST` with body `sync`, `Content-Type: text/plain`, `TTL` header 86400 (UnifiedPush/WebPush convention), and `Urgency: normal`.
 - 404 or 410 deletes the registration. Other failures are logged at Debug with the session ID only, then ignored.
@@ -494,13 +503,13 @@ The build order deviates from the suggested one, on purpose. Everything not bloc
 - Threshold cases: exactly at, just under, just above, under and back within one batch.
 - Serial articles ignored; archived ignored.
 - The author gets no alert in pull; another Member does; a Viewer only after opting in; a Guest never.
-- Push sender (fake `HttpMessageHandler`): sent after commit only; 410 deletes the registration; a failure is swallowed.
+- Push sender (fake `HttpMessageHandler`): sent after commit only; 410 deletes the registration; a failure is swallowed. **Not yet done**, with the sender.
 
-**Done when:** the spec's alert tests are green.
+**Done when:** the spec's alert tests are green. The detector and the pull filtering are done; the push sender is not.
 
 ### Phase 10: Background jobs (S–M)
 
-**File:** `Jobs/CleanupService.cs`, a `BackgroundService` using `PeriodicTimer(1h)` driven by `TimeProvider`. The first run is 1 minute after start. Each task runs in its own DI scope and try/catch.
+**Partly done:** `Handlers/Cleanup/CleanupService.cs` is a `BackgroundService` using a `PeriodicTimer` driven by `TimeProvider` (every `EASYSTOCK_CLEANUP_INTERVAL_MINUTES`, default 60). The first run is 1 minute after start; each run has its own DI scope and try/catch, and `Handlers/Cleanup/CleanupHandler.cs` does the work. It covers promotions, invites, resets and sessions (tasks 2 and 3). **Not yet done:** tasks 1, 4 and 5 (guests, `sync_batch`, images; `ImageHandler.DeleteOrphansAsync` exists but is not called by the job).
 
 **Tasks**
 1. Delete Guests with `last_seen_at` more than 90 days ago (hard delete, with cascades).
@@ -517,21 +526,21 @@ Expose `CleanupService.RunOnceAsync()` for tests.
 
 ### Phase 11: Backup export and import (M–L, BLOCKED on the app backup format)
 
-**Files:** `Backup/BackupExporter.cs`, `Backup/BackupImporter.cs` (new folder beyond the spec layout), and `AdminEndpoints.Backup.cs`.
+**Files:** `Handlers/Backup/BackupExportHandler.cs`, `BackupImportHandler.cs`, `BackupImageHandler.cs`, `BackupImportHooksHandler.cs`, `Helpers/Backup*Helper.cs` and `Controllers/AdminBackupController.cs`.
 
 **Decisions**
 - Export:
   - Read-only REPEATABLE READ snapshot. Stream the zip (or whatever the app format is) with `ZipArchive` over the response body, with no full in-memory buffer.
   - Map `image_sha256` back to the app's `image_path` convention.
   - Omit server-only columns (`created_by`, `device_id`) unless the app format has a place for them.
-- Merge import: parse into the same DTOs, then call `PushProcessor.ApplyAsync(rows, actor: importing admin, source: Import)`. The import may exceed the 5000-row limit, so it goes through an internal entry point without that limit.
+- Merge import: parse into the same DTOs, then run them through the conflict rules as the importing Admin (`BackupMergeHelper`). The import may exceed the 5000-row limit, so it goes through an internal entry point without that limit.
   - Movements are imported with null `created_by` and `device_id`.
-  - Photos are written through `ImageStore`.
+  - Photos are written through `ImageHandler`.
   - Returns a summary (counts per status and conflict code).
 - Replace import, in one transaction holding the sync lock:
   - Truncate the shared tables, `low_stock_state` and `low_stock_alert`.
   - Bulk insert (the trigger assigns seq) and recompute `low_stock_state` without creating alerts.
-  - Set a new `dataset_epoch` and push `sync` to all sessions. The epoch is done; the `sync` push waits for the push sender (`BackupImportHooksHandler.AfterCommitAsync`).
+  - Set a new `dataset_epoch` and push `sync` to all sessions. The epoch is done; the `sync` push is **not yet done**: it waits for the push sender (`BackupImportHooksHandler.AfterCommitAsync`).
 - Request size: 500 MB limit on this endpoint only. `RequestDecompression` handles gzip.
 
 **Tests:**
@@ -555,8 +564,8 @@ Expose `CleanupService.RunOnceAsync()` for tests.
 - `HEALTHCHECK CMD ["dotnet","EasyStock.Server.dll","--healthcheck"]`. The aspnet image ships neither curl nor wget. The `--healthcheck` branch in `Program.cs` runs before the host is built and does one `HttpClient` GET to `http://127.0.0.1:8080/health`, exiting 0 or 1. Interval 30 s, start period 30 s.
 
 **Compose**
-- `db`: `postgres:17-alpine` with a named volume `pgdata` and a `pg_isready` healthcheck.
-- `server`: image `ghcr.io/mathorck/easystock-server:latest` (with a `build: .` alternative), `depends_on: db: condition: service_healthy`, named volume `easystock-data:/data`, `ports: "8080:8080"`, `env_file: .env`, `restart: unless-stopped`.
+- `db`: `postgres:16-alpine` with a named volume `pgdata` and a `pg_isready` healthcheck.
+- `server`: image `ghcr.io/mathorck/easystock-server:latest` (with a `build: .` alternative), `depends_on: db: condition: service_healthy`, named volume `easystock-data:/data`, `ports: "8080:8080"`, `environment:` entries filled from `.env` (listed in `docker-compose.yml`), `restart: unless-stopped`.
 - `.env.example`: `EASYSTOCK_DB`, `EASYSTOCK_PUBLIC_URL`, `EASYSTOCK_CERT_FINGERPRINT`, `EASYSTOCK_LOG_LEVEL`, `EASYSTOCK_TRUSTED_PROXIES`, `POSTGRES_PASSWORD`.
 
 **Done when:**
@@ -566,7 +575,7 @@ Expose `CleanupService.RunOnceAsync()` for tests.
 
 ### Phase 13: CI and releases (S)
 
-- In the app repo's existing workflow, add a `server` job: `actions/setup-dotnet` 10.x, `dotnet restore`/`build`/`test` in `server/`, with a path filter on `server/**` and `docs/test-cases/**`. Testcontainers works with Docker on `ubuntu-latest`.
+- This repo has `.github/workflows/ci.yml` and `release.yml`. The plan was a `server` job in the app repo's workflow: `actions/setup-dotnet` 10.x, `dotnet restore`/`build`/`test` in `server/`, with a path filter on `server/**` and `docs/test-cases/**`. Testcontainers works with Docker on `ubuntu-latest`.
 - Also run the Kotlin merge tests whenever `docs/test-cases/**` changes, so both sides gate shared fixtures.
 - Release workflow on tag `X.Y.Z` (no `v` prefix):
   - `docker/setup-qemu-action`, `docker/setup-buildx-action`, login to GHCR with `GITHUB_TOKEN` (`permissions: packages: write`).
@@ -576,7 +585,7 @@ Expose `CleanupService.RunOnceAsync()` for tests.
 
 ### Phase 14: README and docs (S)
 
-`server/README.md` covers:
+The root `README.md` of this repo (planned as `server/README.md`) covers:
 - Quick start with Compose; the first-start setup QR.
 - A Caddy reverse-proxy example and the self-signed certificate option with fingerprint computation (`openssl x509 -noout -fingerprint -sha256`).
 - `EASYSTOCK_TRUSTED_PROXIES` with a Compose example.
@@ -619,11 +628,12 @@ Also update `docs/03-server-spec.md` with the decisions from 1.2 so the spec sta
 
 ### 3.3 Refresh-token rotation with reuse detection
 
-- Storage: SHA-256 of the 32 raw bytes, never the token. Lookup is one indexed query on `refresh_token_hash = @h OR previous_token_hash = @h` (two unique partial indexes), then `SELECT … FOR UPDATE` on the found row.
-- The three outcomes are listed in Phase 3. Reuse sets `revoked_at` and `revoke_reason='token-reuse'`.
+- Format (`RefreshTokenHandler`): Base64URL of `session id (16) | nonce (32) | tag (16)`, the tag an HMAC-SHA256 under a key derived (HKDF) from the JWT signing key. The first nonce is random; each rotation derives the next token from the session id and the old hash.
+- Storage: SHA-256 of the token string, never the token. A token with a valid tag is looked up by session id; any other (forged, issued under a replaced key, or older 32-byte random tokens) by `refresh_token_hash = @h OR previous_token_hash = @h`. Both with `SELECT … FOR UPDATE`.
+- The outcomes are listed in Phase 3. Reuse sets `revoked_at` and `revoke_reason='token-reuse'`.
 - Logging only covers the session ID and the reason.
-- Concurrent refreshes with the same current token: the row lock makes the second see the token as "previous", which revokes the session. This is strict but correct per spec. Mention the grace-window option (1.2 #18) to the owner.
-- Refresh tokens don't depend on the JWT key, so losing the key only forces a refresh, not a re-login.
+- Concurrent refreshes with the same current token: the row lock makes the second see the token as "previous"; within the grace it gets the same new token (1.2 #18).
+- Losing the JWT key only forces a refresh, not a re-login: current refresh tokens are still found by hash. Tokens issued before the change can no longer reveal reuse of an older token.
 
 ### 3.4 Per-request session validation
 
@@ -642,13 +652,13 @@ Also update `docs/03-server-spec.md` with the decisions from 1.2 so the spec sta
 - No rotation in v1. Deleting the file rotates the key; the effect is one refresh per phone.
 - Data-protection keys go to `${DATA_DIR}/dp-keys` (`PersistKeysToFileSystem`, `SetApplicationName("EasyStock.Server")`). They are barely used, but this keeps Identity's token providers stable.
 
-### 3.6 Problem Details type catalogue (`Infrastructure/ProblemTypesHelper.cs`)
+### 3.6 Problem Details type catalogue (`Helpers/ProblemTypesHelper.cs`)
 
 | type | status | when |
 |---|---|---|
 | `validation-failed` | 400 | bad body or query; `errors` map |
 | `invalid-credentials` | 401 | wrong username or password, wrong current password |
-| `account-locked` | 401 | lockout; `retryAfter` |
+| `account-locked` | 401 | reserved; no longer sent (a locked login answers `invalid-credentials`) |
 | `account-disabled` | 401 | disabled or deleted |
 | `unauthorized` | 401 | missing or invalid token |
 | `token-expired` | 401 | expired access token |
@@ -669,6 +679,8 @@ Also update `docs/03-server-spec.md` with the decisions from 1.2 so the spec sta
 | `invite-expired`, `invite-used`, `reset-expired`, `reset-used`, `promotion-expired` | 410 | |
 | `short-code-mismatch` | 400 | |
 | `hash-mismatch` | 400 | image |
+| `not-a-jpeg` | 400 | image body is not a JPEG |
+| `backup-invalid`, `backup-encrypted`, `backup-newer-version`, `not-a-backup` | 422 | backup import |
 | `image-too-large`, `batch-too-large`, `backup-too-large` | 413 | |
 | `unsupported-media-type` | 415 | |
 | `app-too-old` | 426 | version or schema header |
@@ -679,7 +691,7 @@ Per-row push reasons are a separate, smaller set inside `results[].reason`: `not
 
 ### 3.7 Version-header middleware
 
-- `VersionHeaderMiddleware` runs before routing and skips the exempt prefixes (1.2 #24).
+- `Configuration/VersionHeaderMiddleware.cs` runs before routing and skips the exempt prefixes (1.2 #24).
 - It parses `X-EasyStock-App-Version` as `System.Version` (major.minor.patch) and `X-EasyStock-Schema-Version` as an int.
 - If the app version is below `CompatHelper.MinAppVersion`, the schema version is outside `CompatHelper.SupportedSchemaVersions`, or either header is missing or unparsable, it answers 426 `app-too-old`. The extensions carry `minAppVersion` and `supportedSchemaVersions` so the app can show a precise message.
 - An OpenAPI operation transformer documents both headers on every non-exempt operation.
@@ -699,7 +711,7 @@ Per-row push reasons are a separate, smaller set inside `results[].reason`: `not
 
 ### 3.10 Guest filter location
 
-- It lives in `Sync/GuestFilter.cs` and is called only from `PullBuilder`, the only code path that returns shared rows to a Guest.
+- It lives in `Helpers/PullGuestFilterHelper.cs` and is called only from `PullHandler`, the only code path that returns shared rows to a Guest.
 - An architecture test asserts that no endpoint other than pull returns shared DTOs to a role without `ReadMovementsFull`:
   - Admin, backup and push endpoints require permissions Guests lack.
   - Images carry no personal data.
@@ -757,9 +769,9 @@ Per-row push reasons are a separate, smaller set inside `results[].reason`: `not
 ---
 
 ### Critical files for implementation
-- /home/mathorck/Documents/dev/EasyStockServer/docs/03-server-spec.md (source spec; update with the decisions from 1.2)
-- /home/mathorck/Documents/dev/EasyStockServer/server/src/EasyStock.Server/Sync/PushProcessor.cs (planned; lock, idempotency, per-row pipeline)
-- /home/mathorck/Documents/dev/EasyStockServer/server/src/EasyStock.Server/Sync/ConflictRules.cs (planned; BackupMerge port)
-- /home/mathorck/Documents/dev/EasyStockServer/server/src/EasyStock.Server/Permissions.cs (planned; role × operation matrix)
-- /home/mathorck/Documents/dev/EasyStockServer/server/src/EasyStock.Server/Data/EasyStockDbContext.cs (planned; Identity customisation, snake_case, sequence and triggers migration)
-- /home/mathorck/Documents/dev/EasyStockServer/server/src/EasyStock.Server/Sync/PullBuilder.cs (planned; snapshot pull, cursor, Guest filter call site)
+Paths are relative to the repository root.
+- `docs/03-server-spec.md` (source spec; update with the decisions from 1.2)
+- `server/src/EasyStock.Server/Handlers/Sync/PushHandler.cs` (lock, idempotency, per-row pipeline)
+- `server/src/EasyStock.Server/Helpers/BackupMergeHelper.cs` and `Helpers/ConflictTypesHelper.cs` (BackupMerge port and conflict codes)
+- `server/src/EasyStock.Server/Enums/Permission.cs` and `Helpers/PermissionsHelper.cs` (role x operation matrix)
+- `server/src/EasyStock.Server/DB/EasyStockDbContext.cs` (Identity customisation, snake_case, sequence and triggers migration)

@@ -9,8 +9,8 @@ namespace EasyStock.Server.Helpers;
 /// Port of the app's <c>planMerge</c> (BackupMerge.kt), rule for rule. Merges <c>incoming</c> into <c>local</c> by id
 /// (every row of both, soft-deleted ones included):
 /// a row on one side only is added; a row on both sides: the newer <c>updated_at</c> wins (a soft delete is an update),
-/// the local one on a tie; <c>stock_movement</c> is append-only; unique columns are resolved deterministically (rows
-/// sorted by id) and reported as conflicts; <c>item.location_id</c> is recomputed from the merged movements; reviews
+/// the local one on a tie; <c>stock_movement</c> is append-only; unique columns are resolved deterministically (values
+/// of replaced local rows released first, then rows sorted by id) and reported as conflicts; <c>item.location_id</c> is recomputed from the merged movements; reviews
 /// and their lines merge like the other rows. Incoming must be valid. Pure: nothing is written.
 /// </summary>
 public static class BackupMergeHelper
@@ -114,30 +114,71 @@ public static class BackupMergeHelper
         }
     }
 
-    /// <summary>Owner id of each value of a unique column, in the merged state.</summary>
-    private sealed class UniqueIndex<T>(IEnumerable<T> rows, Func<T, string> id, Func<T, string?> value, Func<string, string> normalize)
+    /// <summary>
+    /// Owner ids of each value of a unique column, in the merged state. Values are compared after normalize (names,
+    /// SKUs and serial numbers are unique ignoring case, like the app's forms and the server push). Several owners
+    /// per value: rows that differ only in case can already exist (the database indexes are case-sensitive).
+    /// </summary>
+    private sealed class UniqueIndex<T>
     {
-        private readonly Dictionary<string, string> _owners = Build(rows, id, value, normalize);
+        private readonly Func<T, string> _id;
+        private readonly Func<T, string?> _value;
+        private readonly Func<string, string> _normalize;
+        private readonly Dictionary<string, HashSet<string>> _owners = new(StringComparer.Ordinal);
+        private readonly Dictionary<string, int> _nextSuffix = new(StringComparer.Ordinal);
 
-        private static Dictionary<string, string> Build(IEnumerable<T> rows, Func<T, string> id, Func<T, string?> value, Func<string, string> normalize)
+        public UniqueIndex(IEnumerable<T> rows, Func<T, string> id, Func<T, string?> value, Func<string, string> normalize)
         {
-            var owners = new Dictionary<string, string>(StringComparer.Ordinal);
-            foreach (var row in rows)
-                if (value(row) is { } v) owners[normalize(v)] = id(row);
-            return owners;
+            (_id, _value, _normalize) = (id, value, normalize);
+            foreach (var row in rows) Claim(row);
         }
 
+        /// <summary>Owner of candidate other than selfId (lowest id when several), or null when free.</summary>
         public string? TakenBy(string candidate, string selfId) =>
-            _owners.TryGetValue(normalize(candidate), out var owner) && owner != selfId ? owner : null;
+            _owners.TryGetValue(_normalize(candidate), out var ids)
+                ? ids.Where(o => o != selfId).Order(StringComparer.Ordinal).FirstOrDefault()
+                : null;
 
         public bool IsFree(string candidate, string selfId) => TakenBy(candidate, selfId) is null;
 
-        /// <summary>Moves selfId from its previous value to the new one.</summary>
+        public void Claim(T row)
+        {
+            if (_value(row) is not { } v) return;
+            var key = _normalize(v);
+            if (!_owners.TryGetValue(key, out var ids)) _owners[key] = ids = new(StringComparer.Ordinal);
+            ids.Add(_id(row));
+        }
+
+        public void Release(T row)
+        {
+            if (_value(row) is not { } v || !_owners.TryGetValue(_normalize(v), out var ids)) return;
+            ids.Remove(_id(row));
+            if (ids.Count == 0) _owners.Remove(_normalize(v));
+        }
+
+        /// <summary>Moves the row from its previous value to the new one.</summary>
         public void Replace(T? previous, T next)
         {
-            if (previous is not null && value(previous) is { } old && _owners.TryGetValue(normalize(old), out var o) && o == id(next))
-                _owners.Remove(normalize(old));
-            if (value(next) is { } v) _owners[normalize(v)] = id(next);
+            if (previous is not null) Release(previous);
+            Claim(next);
+        }
+
+        /// <summary>
+        /// "value (2)", "value (3)"... the first free one, cut to maxLength. The next suffix to try is remembered per
+        /// value: once replaced rows are released up front, claiming only takes values, never frees one, so a suffix
+        /// found taken stays taken.
+        /// </summary>
+        public string Suffixed(string value, string selfId, int maxLength)
+        {
+            var key = _normalize(value);
+            for (var n = _nextSuffix.GetValueOrDefault(key, 2); ; n++)
+            {
+                var suffix = $" ({n})";
+                var candidate = value[..Math.Min(value.Length, maxLength - suffix.Length)].TrimEnd() + suffix;
+                if (!IsFree(candidate, selfId)) continue;
+                _nextSuffix[key] = n + 1;
+                return candidate;
+            }
         }
     }
 
@@ -184,15 +225,16 @@ public static class BackupMergeHelper
             return true;
         }
 
-        /// <summary>"value (2)", "value (3)"... the first free one, cut to maxLength.</summary>
-        private static string Suffixed<T>(string value, string selfId, int maxLength, UniqueIndex<T> index)
+        /// <summary>
+        /// Releases the unique values of local rows that a newer incoming row replaces, before any is claimed (like
+        /// <see cref="ReleaseTags"/>): rows swapping values ("A: X, B: Y" to "A: Y, B: X") don't collide.
+        /// </summary>
+        private static void ReleaseReplaced<T>(IEnumerable<T> incomingRows, Table<T> table, UniqueIndex<T> index, Func<T, long> updatedAt)
+            where T : class
         {
-            for (var n = 2; ; n++)
-            {
-                var suffix = $" ({n})";
-                var candidate = value[..Math.Min(value.Length, maxLength - suffix.Length)].TrimEnd() + suffix;
-                if (index.IsFree(candidate, selfId)) return candidate;
-            }
+            foreach (var row in incomingRows)
+                if (table.Local.TryGetValue(table.Id(row), out var previous) && Newer(row, previous, updatedAt))
+                    index.Release(previous);
         }
 
         /// <summary>Ids on both sides first (they may free unique values), then new ids, each sorted by id.</summary>
@@ -283,6 +325,7 @@ public static class BackupMergeHelper
         {
             var table = new Table<BackupCategory>(local.Categories, x => x.Id);
             var names = new UniqueIndex<BackupCategory>(table.Final.Values, x => x.Id, x => x.Name, s => s.ToLowerInvariant());
+            ReleaseReplaced(incoming.Categories, table, names, x => x.UpdatedAt);
             foreach (var row in Ordered(incoming.Categories, table))
             {
                 table.Final.TryGet(row.Id, out var previous);
@@ -290,7 +333,7 @@ public static class BackupMergeHelper
                 var candidate = row;
                 if (!names.IsFree(row.Name, row.Id))
                 {
-                    candidate = row with { Name = Suffixed(row.Name, row.Id, MaxCategoryNameLength, names) };
+                    candidate = row with { Name = names.Suffixed(row.Name, row.Id, MaxCategoryNameLength) };
                     _conflicts.Add(new(ConflictType.CategoryRenamed, BackupTable.Category, row.Id, row.Name, candidate.Name));
                 }
                 names.Replace(previous, candidate);
@@ -321,7 +364,7 @@ public static class BackupMergeHelper
                 var owner = keys.TakenBy(row.Key, row.Id);
                 if (owner is null)
                 {
-                    keys.Replace(null, row);
+                    keys.Claim(row);
                     table.Insert(row);
                     continue;
                 }
@@ -350,27 +393,51 @@ public static class BackupMergeHelper
                 ? winner with { DataType = "measure", Unit = other.Unit, UpdatedAt = Math.Max(winner.UpdatedAt, other.UpdatedAt) }
                 : winner;
 
+        /// <summary>
+        /// A link whose new pair is taken is skipped and keeps its local pair. Pairs of replaced links are released up
+        /// front (swaps don't collide); when a skipped link's local pair was meanwhile taken by another, the merge is
+        /// redone with that link's pair held from the start.
+        /// </summary>
         private Table<BackupCategoryAttribute> MergeCategoryAttributes(Dictionary<string, string> attributeIds)
         {
-            var table = new Table<BackupCategoryAttribute>(local.CategoryAttributes, x => x.Id);
             static string Pair(BackupCategoryAttribute r) => $"{r.CategoryId}/{r.AttributeId}";
-            var pairs = new UniqueIndex<BackupCategoryAttribute>(table.Final.Values, x => x.Id, Pair, s => s);
             var rows = incoming.CategoryAttributes
                 .Select(r => attributeIds.TryGetValue(r.AttributeId, out var mapped) ? r with { AttributeId = mapped } : r)
                 .ToList();
-            foreach (var row in Ordered(rows, table))
+            var held = new HashSet<string>(StringComparer.Ordinal);
+            while (true)
             {
-                table.Final.TryGet(row.Id, out var previous);
-                if (!Newer(row, previous, x => x.UpdatedAt)) continue;
-                if (!pairs.IsFree(Pair(row), row.Id))
+                var table = new Table<BackupCategoryAttribute>(local.CategoryAttributes, x => x.Id);
+                var pairs = new UniqueIndex<BackupCategoryAttribute>(table.Final.Values, x => x.Id, Pair, s => s);
+                ReleaseReplaced(rows.Where(r => !held.Contains(r.Id)), table, pairs, x => x.UpdatedAt);
+                var conflicts = new List<MergeConflict>();
+                var redo = false;
+                foreach (var row in Ordered(rows, table))
                 {
-                    _conflicts.Add(new(ConflictType.CategoryAttributeSkipped, BackupTable.CategoryAttribute, row.Id));
-                    continue;
+                    table.Final.TryGet(row.Id, out var previous);
+                    if (!Newer(row, previous, x => x.UpdatedAt)) continue;
+                    if (!pairs.IsFree(Pair(row), row.Id))
+                    {
+                        conflicts.Add(new(ConflictType.CategoryAttributeSkipped, BackupTable.CategoryAttribute, row.Id));
+                        if (previous is not null && !held.Contains(row.Id))
+                        {
+                            if (!pairs.IsFree(Pair(previous), row.Id))
+                            {
+                                held.Add(row.Id);
+                                redo = true;
+                                break;
+                            }
+                            pairs.Claim(previous);
+                        }
+                        continue;
+                    }
+                    pairs.Replace(previous, row);
+                    if (previous is null) table.Insert(row); else table.Update(row);
                 }
-                pairs.Replace(previous, row);
-                if (previous is null) table.Insert(row); else table.Update(row);
+                if (redo) continue;
+                _conflicts.AddRange(conflicts);
+                return table;
             }
-            return table;
         }
 
         private Table<BackupLocation> MergeLocations()
@@ -410,6 +477,7 @@ public static class BackupMergeHelper
         {
             var table = new Table<BackupArticle>(local.Articles, x => x.Id);
             var skus = new UniqueIndex<BackupArticle>(table.Final.Values, x => x.Id, x => x.Sku, s => s.ToLowerInvariant());
+            ReleaseReplaced(incoming.Articles, table, skus, x => x.UpdatedAt);
             foreach (var row in Ordered(incoming.Articles, table))
             {
                 table.Final.TryGet(row.Id, out var previous);
@@ -417,7 +485,7 @@ public static class BackupMergeHelper
                 var candidate = row;
                 if (row.Sku is { } sku && !skus.IsFree(sku, row.Id))
                 {
-                    candidate = candidate with { Sku = Suffixed(sku, row.Id, MaxSkuLength, skus) };
+                    candidate = candidate with { Sku = skus.Suffixed(sku, row.Id, MaxSkuLength) };
                     _conflicts.Add(new(ConflictType.SkuRenamed, BackupTable.Article, row.Id, sku, candidate.Sku));
                 }
                 if (row.Barcode is { } barcode && !ClaimTag(barcode, ArticleKey(row.Id)))
@@ -435,6 +503,7 @@ public static class BackupMergeHelper
         {
             var table = new Table<BackupItem>(local.Items, x => x.Id);
             var serials = new UniqueIndex<BackupItem>(table.Final.Values, x => x.Id, x => x.SerialNumber, s => s.ToLowerInvariant());
+            ReleaseReplaced(incoming.Items, table, serials, x => x.UpdatedAt);
             foreach (var row in Ordered(incoming.Items, table))
             {
                 table.Final.TryGet(row.Id, out var previous);
@@ -442,7 +511,7 @@ public static class BackupMergeHelper
                 var candidate = row;
                 if (row.SerialNumber is { } serial && !serials.IsFree(serial, row.Id))
                 {
-                    candidate = row with { SerialNumber = Suffixed(serial, row.Id, MaxSerialLength, serials) };
+                    candidate = row with { SerialNumber = serials.Suffixed(serial, row.Id, MaxSerialLength) };
                     _conflicts.Add(new(ConflictType.SerialRenamed, BackupTable.Item, row.Id, serial, candidate.SerialNumber));
                 }
                 serials.Replace(previous, candidate);

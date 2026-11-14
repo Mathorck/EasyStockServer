@@ -61,6 +61,7 @@ public sealed class LoggingTests(PostgresFixture pg)
         Assert.Contains("EASYSTOCK_LOG_LEVEL", ex.ToString());
     }
 
-    private Microsoft.AspNetCore.Mvc.Testing.WebApplicationFactory<Program> WithSetting(string key, string value) =>
-        new ApiFactory(Db).WithWebHostBuilder(b => b.UseSetting(key, value));
+    // The settings go to the one factory, which the test disposes (no throwaway parent factory is left behind).
+    private ApiFactory WithSetting(string key, string value) =>
+        new(Db, settings: new Dictionary<string, string> { [key] = value });
 }

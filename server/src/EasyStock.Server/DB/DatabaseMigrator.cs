@@ -20,7 +20,7 @@ public sealed partial class DatabaseMigrator(IServiceScopeFactory scopes, ILogge
         await db.Database.OpenConnectionAsync(ct); // the lock belongs to this connection, MigrateAsync reuses it
         try
         {
-            await db.Database.ExecuteSqlAsync($"SELECT pg_advisory_lock({MigrationLockKey})", ct);
+            await AcquireLockAsync(db, ct);
             try
             {
                 await db.Database.MigrateAsync(ct);
@@ -36,6 +36,27 @@ public sealed partial class DatabaseMigrator(IServiceScopeFactory scopes, ILogge
             await db.Database.CloseConnectionAsync();
         }
         LogMigrated(log);
+    }
+
+    /// <summary>How long to wait for another instance that holds the migration lock.</summary>
+    internal static readonly TimeSpan LockTimeout = TimeSpan.FromMinutes(5);
+
+    private static async Task AcquireLockAsync(EasyStockDbContext db, CancellationToken ct)
+    {
+        // Polls pg_try_advisory_lock so a stuck instance cannot block startup forever.
+        var deadline = DateTime.UtcNow + LockTimeout;
+        while (true)
+        {
+            var locked = await db.Database
+                .SqlQuery<bool>($"SELECT pg_try_advisory_lock({MigrationLockKey}) AS \"Value\"")
+                .SingleAsync(ct);
+            if (locked) return;
+            if (DateTime.UtcNow >= deadline)
+                throw new TimeoutException(
+                    $"Timed out after {LockTimeout.TotalMinutes:0} minutes waiting for the database migration lock. " +
+                    "Another EasyStock instance may be migrating or stuck; stop it and start this one again.");
+            await Task.Delay(TimeSpan.FromSeconds(1), ct);
+        }
     }
 
     private const long MigrationLockKey = 0x4553_4D49_4752; // "ESMIGR", distinct from ServerSeq.SyncLockKey

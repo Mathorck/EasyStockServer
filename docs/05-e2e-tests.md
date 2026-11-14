@@ -15,7 +15,7 @@ server/e2e/run.sh [app-dir]     # default app-dir: ../EasyStock next to this rep
 `run.sh` does three things:
 
 1. Starts a fresh server with `start.sh`.
-2. Runs `./gradlew :shared:testAndroidHostTest --tests 'ch.mathorck.easystock.e2e.*'` in the app.
+2. Runs `./gradlew :shared:testAndroidHostTest --tests 'ch.mathorck.easystock.e2e.*' --rerun --console=plain` in the app. `--rerun` makes Gradle run the tests again even when nothing changed in the app, because the server is new on every run.
 3. Stops the server with `stop.sh`, even when a test fails.
 
 Prerequisites:
@@ -33,13 +33,12 @@ saved to `server/e2e/.run/server.log`.
 ```bash
 server/e2e/start.sh                       # prints the URL and writes server/e2e/.run/server.env
 source server/e2e/.run/server.env
-cd ../EasyStock
-./gradlew :shared:testAndroidHostTest --tests 'ch.mathorck.easystock.e2e.*' \
-    -Peasystock.e2e.url=$EASYSTOCK_E2E_URL -Peasystock.e2e.setupToken=$EASYSTOCK_E2E_SETUP_TOKEN
+(cd ../EasyStock && ./gradlew :shared:testAndroidHostTest --tests 'ch.mathorck.easystock.e2e.*' --rerun \
+    -Peasystock.e2e.url=$EASYSTOCK_E2E_URL -Peasystock.e2e.setupToken=$EASYSTOCK_E2E_SETUP_TOKEN)
 server/e2e/stop.sh                        # removes the containers and their volumes
 ```
 
-You can run a single test class again on the same server. The first run sets the server up, and every
+Run the commands from the root of this repository. Add `--rerun` to the Gradle command when you run the same tests again, as `run.sh` does, or Gradle skips them as up to date. You can run a single test class again on the same server. The first run sets the server up, and every
 later run logs in as its Admin (`admin` / `admin-password-0123456789`). The other accounts get new names
 on every run.
 
@@ -55,7 +54,8 @@ app test run therefore needs no server.
 * listens on a free port of 127.0.0.1 with plain HTTP (set the port with `EASYSTOCK_E2E_PORT`);
 * never restarts;
 * uses fast health checks;
-* uses a random database password.
+* uses a random database password;
+* uses test-only values for the optional variables: `start.sh` sets `EASYSTOCK_CERT_FINGERPRINT` and `EASYSTOCK_TRUSTED_PROXIES` empty, so a `server/.env` of your own never leaks into the test server.
 
 `start.sh` then waits until the server is healthy. It reads the setup token from the log and writes
 `EASYSTOCK_E2E_URL` and `EASYSTOCK_E2E_SETUP_TOKEN` to `e2e/.run/server.env`. The server runs with its

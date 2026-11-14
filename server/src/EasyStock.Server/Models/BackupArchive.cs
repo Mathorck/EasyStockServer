@@ -11,7 +11,8 @@ namespace EasyStock.Server.Models;
 /// <summary>
 /// A plain backup archive opened for reading: manifest and tables are decoded and checked, the photos stay in the file
 /// until read. Throws <see cref="BackupException"/> for anything that is not a readable backup. Entries are only ever
-/// looked up by name, never extracted by path.
+/// looked up by name, never extracted by path. Every read is bounded (<see cref="BackupLimits"/>): per entry, and in
+/// total for the manifest, the tables and the hashing of the photos, so a small upload cannot expand without end.
 /// </summary>
 public sealed class BackupArchive : IDisposable
 {
@@ -21,13 +22,18 @@ public sealed class BackupArchive : IDisposable
 
     private readonly ZipArchive _zip;
     private readonly Dictionary<string, ZipArchiveEntry> _photos;
+    private readonly BackupLimits _limits;
+    private readonly ReadBudget _budget;
 
-    private BackupArchive(ZipArchive zip, BackupManifest manifest, BackupData data, Dictionary<string, ZipArchiveEntry> photos)
+    private BackupArchive(ZipArchive zip, BackupManifest manifest, BackupData data, Dictionary<string, ZipArchiveEntry> photos,
+        BackupLimits limits, ReadBudget budget)
     {
         _zip = zip;
         Manifest = manifest;
         Data = data;
         _photos = photos;
+        _limits = limits;
+        _budget = budget;
     }
 
     public BackupManifest Manifest { get; }
@@ -38,7 +44,9 @@ public sealed class BackupArchive : IDisposable
     /// <summary>Photo paths present in the archive.</summary>
     public IReadOnlyCollection<string> PhotoPaths => _photos.Keys;
 
-    public static async Task<BackupArchive> OpenAsync(Stream file, CancellationToken ct)
+    public static Task<BackupArchive> OpenAsync(Stream file, CancellationToken ct) => OpenAsync(file, BackupLimits.Default, ct);
+
+    public static async Task<BackupArchive> OpenAsync(Stream file, BackupLimits limits, CancellationToken ct)
     {
         var prefix = new byte[4];
         file.Position = 0;
@@ -60,16 +68,30 @@ public sealed class BackupArchive : IDisposable
 
         try
         {
+            IReadOnlyCollection<ZipArchiveEntry> all;
+            try
+            {
+                all = zip.Entries;
+            }
+            catch (InvalidDataException)
+            {
+                throw new BackupException(BackupError.Damaged, "Invalid zip");
+            }
+            if (all.Count > limits.Entries) throw new BackupException(BackupError.TooLarge, "Too many entries");
+
             var entries = new Dictionary<string, ZipArchiveEntry>(StringComparer.Ordinal);
-            foreach (var e in zip.Entries)
+            foreach (var e in all)
                 entries.TryAdd(e.FullName, e); // the first of a duplicated name wins, as ZipArchive.GetEntry does
 
+            var budget = new ReadBudget(limits.TotalBytes);
             if (!entries.TryGetValue(BackupFormatHelper.ManifestEntry, out var manifestEntry))
                 throw new BackupException(BackupError.NotABackup, "No manifest");
-            var manifest = CheckManifest(await ReadAsync<BackupManifest>(manifestEntry, BackupFormatHelper.MaxManifestBytes, ct, notABackup: true));
+            var manifest = CheckManifest(await ReadAsync<BackupManifest>(manifestEntry, limits.ManifestBytes, budget, ct, notABackup: true));
 
+            // Each table is decoded whole into a list (the merge needs all of it), bounded per table and, with the
+            // rest of the archive, by the total budget.
             async Task<List<T>> Table<T>(BackupTable t) =>
-                entries.TryGetValue(t.Entry(), out var e) ? await ReadAsync<List<T>>(e, BackupFormatHelper.MaxTableBytes, ct) : [];
+                entries.TryGetValue(t.Entry(), out var e) ? await ReadAsync<List<T>>(e, limits.TableBytes, budget, ct) : [];
 
             var data = new BackupData
             {
@@ -85,7 +107,7 @@ public sealed class BackupArchive : IDisposable
             };
             var photos = entries.Where(kv => BackupFormatHelper.IsValidImagePath(kv.Key) && !kv.Value.FullName.EndsWith('/'))
                 .ToDictionary(kv => kv.Key, kv => kv.Value, StringComparer.Ordinal);
-            return new BackupArchive(zip, manifest, data, photos);
+            return new BackupArchive(zip, manifest, data, photos, limits, budget);
         }
         catch
         {
@@ -95,15 +117,16 @@ public sealed class BackupArchive : IDisposable
     }
 
     /// <summary>
-    /// Reads a photo to compute its SHA-256 (lower-case hex) and checks it is a JPEG within the size limit.
-    /// Null when the archive has no such photo.
+    /// Reads a photo to compute its SHA-256 (lower-case hex) and checks it is a JPEG within the size limit (the image
+    /// store's, so every photo that passes can be stored). Counts against the archive's total budget. Null when the
+    /// archive has no such photo.
     /// </summary>
     public async Task<string?> HashPhotoAsync(string path, CancellationToken ct)
     {
         if (!_photos.TryGetValue(path, out var entry)) return null;
         try
         {
-            await using var stream = new LimitedStream(await entry.OpenAsync(ct), BackupFormatHelper.MaxImageBytes);
+            await using var stream = new LimitedStream(await entry.OpenAsync(ct), _limits.ImageBytes, _budget);
             using var hash = IncrementalHash.CreateHash(HashAlgorithmName.SHA256);
             var buffer = new byte[81920];
             var first = true;
@@ -127,9 +150,12 @@ public sealed class BackupArchive : IDisposable
         }
     }
 
-    /// <summary>Opens a photo of the archive (bounded). Null when missing.</summary>
+    /// <summary>
+    /// Opens a photo of the archive (bounded per photo). Null when missing. Meant for a photo already checked by
+    /// <see cref="HashPhotoAsync"/>, whose bytes were counted then, so this second read is not counted again.
+    /// </summary>
     public async Task<Stream?> OpenPhotoAsync(string path, CancellationToken ct) =>
-        _photos.TryGetValue(path, out var entry) ? new LimitedStream(await entry.OpenAsync(ct), BackupFormatHelper.MaxImageBytes) : null;
+        _photos.TryGetValue(path, out var entry) ? new LimitedStream(await entry.OpenAsync(ct), _limits.ImageBytes) : null;
 
     public void Dispose() => _zip.Dispose();
 
@@ -139,16 +165,18 @@ public sealed class BackupArchive : IDisposable
         if (m.FormatVersion < 1 || m.SchemaVersion < 1) throw new BackupException(BackupError.Damaged, "Invalid version");
         if (m.FormatVersion > BackupFormatHelper.FormatVersion) throw new BackupException(BackupError.NewerVersion, "Newer format");
         if (m.SchemaVersion > BackupFormatHelper.MaxImportSchemaVersion) throw new BackupException(BackupError.NewerVersion, "Newer schema");
+        // An older app's tables are not the ones the server matches: refused rather than read with another shape.
+        if (m.SchemaVersion < BackupFormatHelper.MinImportSchemaVersion) throw new BackupException(BackupError.Damaged, "Unsupported older schema");
         return m;
     }
 
-    private static async Task<T> ReadAsync<T>(ZipArchiveEntry entry, long maxBytes, CancellationToken ct, bool notABackup = false)
+    private static async Task<T> ReadAsync<T>(ZipArchiveEntry entry, long maxBytes, ReadBudget budget, CancellationToken ct, bool notABackup = false)
     {
         if (entry.FullName.EndsWith('/')) throw new BackupException(BackupError.Damaged, "Directory entry");
         try
         {
             // The size in the entry is not trusted: the stream is cut at the limit.
-            await using var stream = new LimitedStream(await entry.OpenAsync(ct), maxBytes);
+            await using var stream = new LimitedStream(await entry.OpenAsync(ct), maxBytes, budget);
             return await JsonSerializer.DeserializeAsync<T>(stream, BackupFormatHelper.Json, ct)
                    ?? throw new BackupException(BackupError.Damaged, "Empty table");
         }
@@ -159,8 +187,23 @@ public sealed class BackupArchive : IDisposable
     }
 }
 
-/// <summary>Read-only stream that throws <see cref="BackupException"/> (TooLarge) once more than a limit has been read.</summary>
-internal sealed class LimitedStream(Stream inner, long limit) : Stream
+/// <summary>Decompressed bytes an archive may still be read for, shared by its bounded streams.</summary>
+internal sealed class ReadBudget(long total)
+{
+    private long _remaining = total;
+
+    public void Take(int n)
+    {
+        _remaining -= n;
+        if (_remaining < 0) throw new BackupException(BackupError.TooLarge, "Archive too large");
+    }
+}
+
+/// <summary>
+/// Read-only stream that throws <see cref="BackupException"/> (TooLarge) once more than a limit has been read, or once
+/// the shared budget of its archive runs out.
+/// </summary>
+internal sealed class LimitedStream(Stream inner, long limit, ReadBudget? budget = null) : Stream
 {
     private long _read;
 
@@ -174,6 +217,7 @@ internal sealed class LimitedStream(Stream inner, long limit) : Stream
     {
         _read += n;
         if (_read > limit) throw new BackupException(BackupError.TooLarge, "Entry too large");
+        budget?.Take(n);
         return n;
     }
 

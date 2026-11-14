@@ -74,4 +74,19 @@ public sealed class ResetTests(PostgresFixture pg) : IDisposable
         var ex = await Assert.ThrowsAsync<ProblemException>(() => CreateReset(Guid.NewGuid()));
         Assert.Equal(ProblemTypesHelper.NotFound, ex.Type);
     }
+
+    [Fact]
+    public async Task Reset_token_still_works_after_a_rejected_new_password()
+    {
+        var user = await _factory.CreateUserAsync();
+        var grant = await CreateReset(user.Id);
+
+        var rejected = await _factory.CreateVersionedClient().PostJson("/api/v1/auth/reset",
+            new { resetToken = grant.Token, password = "short", deviceName = "Pixel" });
+        var problem = await rejected.Problem(HttpStatusCode.BadRequest, "validation-failed");
+        Assert.True(problem.GetProperty("errors").TryGetProperty("password", out _));
+
+        Assert.Equal(HttpStatusCode.OK, (await Redeem(grant.Token)).StatusCode);
+        await (await Redeem(grant.Token)).Problem(HttpStatusCode.Gone, "reset-used");
+    }
 }

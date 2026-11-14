@@ -9,7 +9,10 @@ public sealed class DeviceSession
     public string DeviceName { get; set; } = "";
     public byte[] RefreshTokenHash { get; set; } = [];
 
-    /// <summary>Hash of the token before the last rotation: presenting it again revokes the session.</summary>
+    /// <summary>
+    /// Hash of the token before the last rotation. Presented again within the reuse grace window it answers with
+    /// the current token; later, it revokes the session (as any older token of the session does).
+    /// </summary>
     public byte[]? PreviousTokenHash { get; set; }
 
     public DateTimeOffset CreatedAt { get; set; }

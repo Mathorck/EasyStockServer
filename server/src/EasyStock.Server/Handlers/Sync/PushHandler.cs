@@ -1,13 +1,16 @@
 using System.Linq.Expressions;
+using System.Security.Cryptography;
 using System.Text.Json;
 using System.Text.Json.Nodes;
 using EasyStock.Server.Filters;
 using EasyStock.Server.Interfaces;
 using EasyStock.Server.DB;
+using EasyStock.Server.DB.Configurations;
 using EasyStock.Server.DB.Entities;
 using EasyStock.Server.Helpers;
 using EasyStock.Server.Models;
 using Microsoft.EntityFrameworkCore;
+using Npgsql;
 
 namespace EasyStock.Server.Handlers.Sync;
 
@@ -25,8 +28,9 @@ public sealed partial class PushHandler(
     public const long MaxBodyBytes = 10 * 1024 * 1024;
 
     /// <summary>
-    /// The answer exactly as sent and saved; null with <see cref="BatchIdReused"/> set, or with <see cref="ResetEpoch"/>
-    /// (the current epoch) when the phone's dataset epoch is stale.
+    /// The answer exactly as sent and saved; null with <see cref="BatchIdReused"/> set (the batch ID is another user's,
+    /// or was already used with other rows), or with <see cref="ResetEpoch"/> (the current epoch) when the phone's
+    /// dataset epoch is stale.
     /// </summary>
     public sealed record Outcome(string? Json, bool BatchIdReused = false, string? ResetEpoch = null);
 
@@ -37,7 +41,10 @@ public sealed partial class PushHandler(
     /// <summary>State shared by the rows of one batch.</summary>
     private sealed class BatchState
     {
-        /// <summary>attribute_definition merged into another one with the same key: incoming ID → server ID.</summary>
+        /// <summary>
+        /// attribute_definition merged into another one with the same key: incoming ID → server ID. A cache of
+        /// attribute_alias, which keeps them for later batches.
+        /// </summary>
         public Dictionary<Guid, Guid> AttributeAliases { get; } = [];
 
         /// <summary>Articles whose stock or threshold rules may have changed.</summary>
@@ -59,12 +66,19 @@ public sealed partial class PushHandler(
             return new Outcome(null, ResetEpoch: current);
 
         // Checked under the lock: two identical batches at once serialise and the second gets the saved answer.
+        var hash = HashRows(rows);
         var saved = await db.Set<SyncBatch>().AsNoTracking().FirstOrDefaultAsync(b => b.BatchId == batchId, ct);
         if (saved is not null)
         {
             if (saved.UserId != user.UserId)
             {
                 LogBatchIdReused(batchId, user.UserId);
+                return new Outcome(null, BatchIdReused: true);
+            }
+            // The same ID with other rows: the saved answer would not cover them, and they would be silently dropped.
+            if (saved.RequestHash is { } savedHash && !savedHash.AsSpan().SequenceEqual(hash))
+            {
+                LogBatchContentChanged(batchId, user.UserId);
                 return new Outcome(null, BatchIdReused: true);
             }
             LogReplayed(batchId, user.UserId);
@@ -93,6 +107,7 @@ public sealed partial class PushHandler(
             DeviceSessionId = user.SessionId,
             ReceivedAt = time.GetUtcNow(),
             Response = json,
+            RequestHash = hash,
         });
         await db.SaveChangesAsync(ct);
         db.ChangeTracker.Clear();
@@ -102,6 +117,10 @@ public sealed partial class PushHandler(
             results.Count(r => r.Status == SyncPushStatusHelper.Changed), results.Count(r => r.Status == SyncPushStatusHelper.Rejected), alerts);
         return new Outcome(json);
     }
+
+    /// <summary>SHA-256 of the rows as parsed: whitespace does not count, table and row order do.</summary>
+    private static byte[] HashRows(IReadOnlyDictionary<string, List<JsonNode?>> rows) =>
+        SHA256.HashData(JsonSerializer.SerializeToUtf8Bytes(rows));
 
     private static Pending Parse(JsonNode? node)
     {
@@ -131,17 +150,24 @@ public sealed partial class PushHandler(
             if (rows[i].Id is { } id) index.TryAdd(id, i);
         var visited = new bool[rows.Count];
         var result = new List<Pending>(rows.Count);
-        void Visit(int i)
+        // Iterative: a long parent chain in one batch must not overflow the stack.
+        var chain = new Stack<int>();
+        for (var start = 0; start < rows.Count; start++)
         {
-            if (visited[i]) return;
-            visited[i] = true; // also stops on a cycle within the batch; the cycle rule handles it
-            if (rows[i].Row?["parentId"] is JsonValue p && p.TryGetValue<string>(out var s) && Guid.TryParse(s, out var parent)
-                && index.TryGetValue(parent, out var j))
-                Visit(j);
-            result.Add(rows[i]);
+            // Walk up to the first ancestor not placed yet, then add the chain top-down.
+            // visited also stops on a cycle within the batch; the cycle rule handles it.
+            for (var i = start; i >= 0 && !visited[i]; i = ParentIndex(i))
+            {
+                visited[i] = true;
+                chain.Push(i);
+            }
+            while (chain.Count > 0) result.Add(rows[chain.Pop()]);
         }
-        for (var i = 0; i < rows.Count; i++) Visit(i);
         return result;
+
+        int ParentIndex(int i) =>
+            rows[i].Row?["parentId"] is JsonValue p && p.TryGetValue<string>(out var s) && Guid.TryParse(s, out var parent)
+            && index.TryGetValue(parent, out var j) ? j : -1;
     }
 
     private Task<List<Guid>> ExistingIdsAsync(string table, List<Guid> ids, CancellationToken ct) => table switch
@@ -175,7 +201,7 @@ public sealed partial class PushHandler(
             var incoming = PushRowCodecHelper.TryRead(table, pending.Row);
             if (incoming is null || !PushRowCodecHelper.TryReadBaseSeq(pending.Row, out var baseSeq))
                 return Rejected(table, rawId, SyncPushReasonHelper.Invalid, existing);
-            if (incoming is CategoryAttribute link && state.AttributeAliases.TryGetValue(link.AttributeId, out var mergedInto))
+            if (incoming is CategoryAttribute link && await MergedIntoAsync(link.AttributeId, state, ct) is { } mergedInto)
                 link.AttributeId = mergedInto;
 
             // Movements never change: the same ID is the same movement.
@@ -210,10 +236,10 @@ public sealed partial class PushHandler(
 
             if (target is null || !PushRowCodecHelper.SameContent(incoming, target))
             {
-                if (await SaveAsync(incoming, target, ct) is false)
+                if (await SaveAsync(incoming, target, ct) is { } reason)
                 {
                     db.ChangeTracker.Clear();
-                    return Rejected(table, rawId, SyncPushReasonHelper.Conflict, await db.FindAsync(type, [id], ct));
+                    return Rejected(table, rawId, reason, await db.FindAsync(type, [id], ct));
                 }
             }
             if (incoming is Article article) state.TouchedArticles.Add(article.Id);
@@ -231,8 +257,11 @@ public sealed partial class PushHandler(
         }
     }
 
-    /// <summary>Inserts <paramref name="row"/>, or copies it onto <paramref name="target"/>. False on a DB conflict.</summary>
-    private async Task<bool> SaveAsync(object row, object? target, CancellationToken ct)
+    /// <summary>
+    /// Inserts <paramref name="row"/>, or copies it onto <paramref name="target"/>. Null when saved, else the reject
+    /// reason of the database conflict.
+    /// </summary>
+    private async Task<string?> SaveAsync(object row, object? target, CancellationToken ct)
     {
         if (target is null)
         {
@@ -251,14 +280,17 @@ public sealed partial class PushHandler(
         {
             await db.SaveChangesAsync(ct);
             await tx.ReleaseSavepointAsync("push_row", ct);
-            return true;
+            return null;
         }
         catch (DbUpdateException e)
         {
             // A backstop: the checks above should catch every unique or foreign key violation.
-            LogRowConflict(e.GetType().Name);
+            var pg = e.InnerException as PostgresException;
+            LogRowConflict(pg?.ConstraintName ?? e.GetType().Name);
             await tx.RollbackToSavepointAsync("push_row", ct);
-            return false;
+            return pg is { SqlState: PostgresErrorCodes.UniqueViolation, ConstraintName: StockReviewConfiguration.OpenReviewIndex }
+                ? SyncPushReasonHelper.ReviewOpen
+                : SyncPushReasonHelper.Conflict;
         }
     }
 
@@ -293,8 +325,10 @@ public sealed partial class PushHandler(
                 var key = d.Key;
                 var same = await db.Set<AttributeDefinition>().FirstOrDefaultAsync(x => x.Key == key, ct);
                 if (same is null) return new();
-                // Both are the same attribute: the incoming one updates the server one, links follow it.
+                // Both are the same attribute: the incoming one updates the server one, links follow it, in this
+                // batch and in later ones.
                 state.AttributeAliases[d.Id] = same.Id;
+                await SaveAliasAsync(d.Id, same.Id, ct);
                 d.Id = same.Id;
                 d.CreatedAt = same.CreatedAt;
                 KeepMeasure(d, same);
@@ -355,6 +389,26 @@ public sealed partial class PushHandler(
                 return new();
         }
     }
+
+    /// <summary>
+    /// The server attribute <paramref name="attributeId"/> was merged into, by this batch or an earlier one; null when
+    /// it was not merged. The ID of a server attribute is never redirected.
+    /// </summary>
+    private async Task<Guid?> MergedIntoAsync(Guid attributeId, BatchState state, CancellationToken ct)
+    {
+        if (state.AttributeAliases.TryGetValue(attributeId, out var cached)) return cached;
+        if (await db.Set<AttributeDefinition>().AnyAsync(a => a.Id == attributeId, ct)) return null;
+        var target = await db.Set<AttributeAlias>().Where(a => a.AliasId == attributeId)
+            .Select(a => (Guid?)a.AttributeId).FirstOrDefaultAsync(ct);
+        if (target is { } t) state.AttributeAliases[attributeId] = t;
+        return target;
+    }
+
+    /// <summary>Remembers a merge for later batches (the latest one wins), in the batch transaction.</summary>
+    private Task SaveAliasAsync(Guid aliasId, Guid attributeId, CancellationToken ct) =>
+        db.Database.ExecuteSqlAsync(
+            $"INSERT INTO attribute_alias (alias_id, attribute_id) VALUES ({aliasId}, {attributeId}) ON CONFLICT (alias_id) DO UPDATE SET attribute_id = EXCLUDED.attribute_id",
+            ct);
 
     /// <summary>
     /// A number attribute merged with a measure stays a measure (BackupMerge.keepMeasure): measure values don't
@@ -481,6 +535,9 @@ public sealed partial class PushHandler(
 
     [LoggerMessage(LogLevel.Warning, "Push batch {BatchId} by user {UserId} reuses the ID of another user's batch")]
     private partial void LogBatchIdReused(Guid batchId, Guid userId);
+
+    [LoggerMessage(LogLevel.Warning, "Push batch {BatchId} by user {UserId} reuses the ID of an earlier batch with other rows")]
+    private partial void LogBatchContentChanged(Guid batchId, Guid userId);
 
     [LoggerMessage(LogLevel.Warning, "Push row rejected by the database ({Error}); the pre-checks missed it")]
     private partial void LogRowConflict(string error);

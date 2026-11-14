@@ -14,7 +14,8 @@ public sealed partial class UsernameValidatorHandler : IUserValidator<AppUser>
     public const string InvalidCode = "InvalidUserName";
     public const string DuplicateCode = "DuplicateUserName";
 
-    [GeneratedRegex("^[A-Za-z0-9._-]{3,32}$")]
+    // \z, not $: $ also matches before a trailing newline.
+    [GeneratedRegex(@"\A[A-Za-z0-9._-]{3,32}\z")]
     private static partial Regex Pattern();
 
     public static bool IsValid(string? username) => username is not null && Pattern().IsMatch(username);

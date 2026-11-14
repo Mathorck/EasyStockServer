@@ -2,7 +2,10 @@ using System.Net;
 using EasyStock.Server.Helpers;
 using EasyStock.Server.Models;
 using EasyStock.Server.Handlers.Auth;
+using EasyStock.Server.Handlers.Admin;
 using EasyStock.Server.Tests.Infrastructure;
+using EasyStock.Server.DB;
+using Microsoft.EntityFrameworkCore;
 using Xunit;
 
 namespace EasyStock.Server.Tests;
@@ -83,6 +86,29 @@ public sealed class GuestSignupTests(PostgresFixture pg)
         var logout = await factory.CreateVersionedClient(first.AccessToken).PostAsync("/api/v1/auth/logout", null, Ct);
         Assert.Equal(HttpStatusCode.NoContent, logout.StatusCode);
         Assert.Equal(HttpStatusCode.OK, (await factory.GuestSignupAsync(token)).StatusCode);
+    }
+
+    [Fact]
+    public async Task Guest_logout_leaves_a_tombstone_with_a_new_server_seq()
+    {
+        using var factory = await NewServer();
+        var token = await factory.EnableGuestSignupAsync();
+        var guest = await (await factory.GuestSignupAsync(token)).Read<TokenAnswer>();
+        var before = await factory.WithService<long, EasyStockDbContext>(db => db.Users.MaxAsync(u => u.ServerSeq, Ct));
+
+        var logout = await factory.CreateVersionedClient(guest.AccessToken).PostAsync("/api/v1/auth/logout", null, Ct);
+        Assert.Equal(HttpStatusCode.NoContent, logout.StatusCode);
+
+        var tombstone = await factory.WithService<(string Name, bool Deleted, long Seq, int Live), EasyStockDbContext>(async db =>
+        {
+            var u = await db.Users.AsNoTracking().OrderByDescending(x => x.ServerSeq).FirstAsync(Ct);
+            var live = await db.DeviceSessions.CountAsync(s => s.UserId == u.Id && s.RevokedAt == null, Ct);
+            return (u.DisplayName, u.DeletedAt is not null, u.ServerSeq, live);
+        });
+        Assert.True(tombstone.Deleted);
+        Assert.Equal(AdminUsersHandler.DeletedDisplayName, tombstone.Name);
+        Assert.True(tombstone.Seq > before);
+        Assert.Equal(0, tombstone.Live);
     }
 
     [Fact]

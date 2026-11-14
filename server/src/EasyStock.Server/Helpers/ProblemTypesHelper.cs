@@ -37,6 +37,7 @@ public static class ProblemTypesHelper
     public const string ResetUsed = "reset-used";                      // 410
     public const string PromotionExpired = "promotion-expired";        // 410
     public const string ImageTooLarge = "image-too-large";             // 413
+    public const string ImageQuotaExceeded = "image-quota-exceeded";   // 413
     public const string BatchTooLarge = "batch-too-large";             // 413
     public const string BackupTooLarge = "backup-too-large";           // 413
     public const string UnsupportedMediaType = "unsupported-media-type"; // 415
@@ -93,9 +94,23 @@ public static class ProblemTypesHelper
         ResetExpired => "This reset code has expired",
         ResetUsed => "This reset code has already been used",
         PromotionExpired => "This promotion has expired",
+        ImageQuotaExceeded => "The image storage is full",
         AppTooOld => "App version not supported",
         RateLimited => "Too many requests",
         InternalError => "Internal error",
+        ShortCodeMismatch => "The short code does not match",
+        HashMismatch => "The content hash does not match",
+        NotJpeg => "The file is not a JPEG image",
+        LastAdmin => "The last admin cannot be removed",
+        BatchIdReused => "This batch id was already used",
+        ImageTooLarge => "The image is too large",
+        BatchTooLarge => "The batch is too large",
+        BackupTooLarge => "The backup is too large",
+        UnsupportedMediaType => "Unsupported media type",
+        BackupInvalid => "The backup is not valid",
+        BackupEncrypted => "The backup is encrypted",
+        BackupNewerVersion => "The backup comes from a newer app version",
+        NotABackup => "The file is not a backup",
         _ => "Error",
     };
 }

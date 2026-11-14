@@ -1,3 +1,4 @@
+using System.Security.Cryptography;
 using EasyStock.Server.Configuration;
 using EasyStock.Server.DB.Entities;
 using EasyStock.Server.DB;
@@ -9,20 +10,27 @@ namespace EasyStock.Server.Handlers.Auth;
 
 /// <summary>
 /// Device sessions and their refresh tokens (docs/04-server-implementation-plan.md, Phase 3). Each refresh
-/// rotates the token and keeps the old hash as "previous": presenting it again means it was copied, so the
-/// session is revoked (<c>token-reuse</c>).
+/// rotates the token and keeps the old hash as "previous". Presenting any replaced token of the session means it
+/// was copied, so the session is revoked (<c>token-reuse</c>), except the just-replaced one within
+/// <see cref="AuthLimitsHelper.RefreshReuseGrace"/>, which answers with the current pair again (parallel refreshes,
+/// retry after a lost answer).
 /// </summary>
 public sealed partial class SessionHandler(
-    EasyStockDbContext db, AccessTokenHandler tokens, TimeProvider time, ILogger<SessionHandler> log)
+    EasyStockDbContext db,
+    AccessTokenHandler tokens,
+    RefreshTokenHandler refreshTokens,
+    TimeProvider time,
+    ILogger<SessionHandler> log)
 {
     /// <summary>Opens a session for <paramref name="user"/> (saved with any other pending change).</summary>
     public async Task<TokenAnswer> CreateAsync(AppUser user, string deviceName, CancellationToken ct)
     {
         var now = time.GetUtcNow();
-        var refresh = SecretTokensHelper.New();
+        var id = Guid.CreateVersion7(now);
+        var refresh = refreshTokens.New(id);
         var session = new DeviceSession
         {
-            Id = Guid.CreateVersion7(now),
+            Id = id,
             UserId = user.Id,
             DeviceName = AccountsHelper.CleanDeviceName(deviceName),
             RefreshTokenHash = SecretTokensHelper.Hash(refresh),
@@ -48,15 +56,24 @@ public sealed partial class SessionHandler(
         var hash = SecretTokensHelper.Hash(refreshToken);
         await using var tx = await db.Database.BeginTransactionAsync(ct);
         // Row lock: two refreshes of one session run one after the other, so the second sees a "previous" token.
-        var session = (await db.DeviceSessions
-            .FromSql($"SELECT * FROM device_session WHERE refresh_token_hash = {hash} OR previous_token_hash = {hash} FOR UPDATE")
-            .ToListAsync(ct)).FirstOrDefault();
+        // A token that names its session is looked up by id, so an older token of the session is found too.
+        var session = (refreshTokens.TryReadSession(refreshToken, out var sessionId)
+            ? await db.DeviceSessions
+                .FromSql($"SELECT * FROM device_session WHERE id = {sessionId} FOR UPDATE")
+                .ToListAsync(ct)
+            : await db.DeviceSessions
+                .FromSql($"SELECT * FROM device_session WHERE refresh_token_hash = {hash} OR previous_token_hash = {hash} FOR UPDATE")
+                .ToListAsync(ct)).FirstOrDefault();
 
         if (session is null || session.RevokedAt is not null)
             throw AccountsHelper.Unauthenticated(ProblemTypesHelper.SessionRevoked);
 
-        if (!session.RefreshTokenHash.AsSpan().SequenceEqual(hash))
+        if (!CryptographicOperations.FixedTimeEquals(session.RefreshTokenHash, hash))
         {
+            if (session.PreviousTokenHash is { } previous && CryptographicOperations.FixedTimeEquals(previous, hash)
+                && session.RotatedAt is { } rotatedAt && now - rotatedAt <= AuthLimitsHelper.RefreshReuseGrace)
+                return await RepeatAsync(session, hash, ct);
+
             Revoke(session, AuthLimitsHelper.RevokeReasons.TokenReuse, now);
             await db.SaveChangesAsync(ct);
             await DeletePushRegistrationsAsync(session.Id, ct);
@@ -74,10 +91,7 @@ public sealed partial class SessionHandler(
             throw AccountsHelper.Unauthenticated(ProblemTypesHelper.SessionRevoked);
         }
 
-        var user = await db.Users.SingleAsync(u => u.Id == session.UserId, ct);
-        if (user.DisabledAt is not null || user.DeletedAt is not null)
-            throw AccountsHelper.Unauthenticated(ProblemTypesHelper.AccountDisabled);
-
+        var user = await ActiveUserAsync(session.UserId, ct);
         var next = Rotate(session, now);
         await db.SaveChangesAsync(ct);
         await tx.CommitAsync(ct);
@@ -98,6 +112,29 @@ public sealed partial class SessionHandler(
         var next = Rotate(session, time.GetUtcNow());
         await db.SaveChangesAsync(ct);
         return next;
+    }
+
+    /// <summary>
+    /// The just-replaced token came back within the grace window: answer with the current token again, without
+    /// rotating. The current token is derived from the replaced one, so it is rebuilt rather than stored.
+    /// </summary>
+    private async Task<TokenAnswer> RepeatAsync(DeviceSession session, byte[] presentedHash, CancellationToken ct)
+    {
+        var current = refreshTokens.Next(session.Id, presentedHash);
+        // Fails only when the signing key changed since the rotation: refuse without revoking.
+        if (!SecretTokensHelper.Matches(current, session.RefreshTokenHash))
+            throw AccountsHelper.Unauthenticated(ProblemTypesHelper.Unauthorized);
+        var user = await ActiveUserAsync(session.UserId, ct);
+        LogRepeated(log, session.Id);
+        return Answer(user, session.Id, current);
+    }
+
+    private async Task<AppUser> ActiveUserAsync(Guid userId, CancellationToken ct)
+    {
+        var user = await db.Users.SingleAsync(u => u.Id == userId, ct);
+        if (user.DisabledAt is not null || user.DeletedAt is not null)
+            throw AccountsHelper.Unauthenticated(ProblemTypesHelper.AccountDisabled);
+        return user;
     }
 
     public async Task<bool> RevokeAsync(Guid sessionId, string reason, CancellationToken ct)
@@ -151,9 +188,9 @@ public sealed partial class SessionHandler(
     private Task<int> DeletePushRegistrationsAsync(Guid sessionId, CancellationToken ct) =>
         db.Set<PushRegistration>().Where(p => p.DeviceSessionId == sessionId).ExecuteDeleteAsync(ct);
 
-    private static string Rotate(DeviceSession session, DateTimeOffset now)
+    private string Rotate(DeviceSession session, DateTimeOffset now)
     {
-        var next = SecretTokensHelper.New();
+        var next = refreshTokens.Next(session.Id, session.RefreshTokenHash);
         session.PreviousTokenHash = session.RefreshTokenHash;
         session.RefreshTokenHash = SecretTokensHelper.Hash(next);
         session.RotatedAt = now;
@@ -175,4 +212,7 @@ public sealed partial class SessionHandler(
 
     [LoggerMessage(Level = LogLevel.Warning, Message = "Refresh token reused: session {SessionId} of user {UserId} revoked")]
     private static partial void LogReuse(ILogger log, Guid sessionId, Guid userId);
+
+    [LoggerMessage(Level = LogLevel.Information, Message = "Session {SessionId}: replaced refresh token presented again within the grace window")]
+    private static partial void LogRepeated(ILogger log, Guid sessionId);
 }

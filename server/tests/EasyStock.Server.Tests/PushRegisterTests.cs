@@ -48,6 +48,7 @@ public sealed class PushRegisterTests(PostgresFixture pg)
         Assert.Equal(HttpStatusCode.NoContent,
             (await client.PostAsJsonAsync(Path, new PushRegisterRequest(Endpoint), ct)).StatusCode);
         var second = "http://192.168.1.10:8081/up-second";
+        factory.Time.Advance(TimeSpan.FromSeconds(5));
         Assert.Equal(HttpStatusCode.NoContent,
             (await client.PostAsJsonAsync(Path, new PushRegisterRequest(second), ct)).StatusCode);
 
@@ -56,7 +57,7 @@ public sealed class PushRegisterTests(PostgresFixture pg)
         var rows = await db.Set<PushRegistration>().Where(r => r.DeviceSessionId == user.SessionId).ToListAsync(ct);
         var row = Assert.Single(rows);
         Assert.Equal(second, row.Endpoint);
-        Assert.True(row.UpdatedAt >= row.CreatedAt);
+        Assert.True(row.UpdatedAt > row.CreatedAt);
     }
 
     [Fact]
@@ -66,7 +67,9 @@ public sealed class PushRegisterTests(PostgresFixture pg)
         using var factory = new ApiFactory(pg.ConnectionString);
         var user = await factory.SignInAsync(Role.Viewer);
         var client = factory.ClientFor(user);
-        await client.PostAsJsonAsync(Path, new PushRegisterRequest(Endpoint), ct);
+        Assert.Equal(HttpStatusCode.NoContent,
+            (await client.PostAsJsonAsync(Path, new PushRegisterRequest(Endpoint), ct)).StatusCode);
+        Assert.NotNull(await Find(factory, user.SessionId, ct));
 
         var response = await client.DeleteAsync(Path, ct);
 
@@ -111,6 +114,8 @@ public sealed class PushRegisterTests(PostgresFixture pg)
     [InlineData("ftp://ntfy.example.org/up")]
     [InlineData("https://")]
     [InlineData("https://ntfy.example.org/has space")]
+    [InlineData("https://user:pw@ntfy.example.org/up")]
+    [InlineData("http://user@192.168.1.10/up")]
     public async Task Invalid_endpoint_gives_400(string? endpoint)
     {
         var ct = TestContext.Current.CancellationToken;
@@ -137,7 +142,7 @@ public sealed class PushRegisterTests(PostgresFixture pg)
     }
 
     [Fact]
-    public async Task Guest_logout_still_deletes_the_guest_with_its_push_registration()
+    public async Task Guest_logout_soft_deletes_the_guest_and_drops_its_push_registration()
     {
         var ct = TestContext.Current.CancellationToken;
         using var factory = new ApiFactory(pg.ConnectionString);
@@ -151,8 +156,8 @@ public sealed class PushRegisterTests(PostgresFixture pg)
         Assert.Equal(HttpStatusCode.NoContent, logout.StatusCode);
         await factory.WithDb(async db =>
         {
-            Assert.False(await db.Users.AnyAsync(u => u.Id == guest.UserId, ct));
-            Assert.False(await db.DeviceSessions.AnyAsync(s => s.Id == guest.SessionId, ct));
+            Assert.NotNull(await db.Users.Where(u => u.Id == guest.UserId).Select(u => u.DeletedAt).SingleAsync(ct));
+            Assert.NotNull(await db.DeviceSessions.Where(s => s.Id == guest.SessionId).Select(s => s.RevokedAt).SingleAsync(ct));
             Assert.False(await db.Set<PushRegistration>().AnyAsync(r => r.DeviceSessionId == guest.SessionId, ct));
         });
     }

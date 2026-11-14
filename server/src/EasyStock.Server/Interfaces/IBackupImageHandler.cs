@@ -19,6 +19,9 @@ public interface IBackupImageHandler
     /// <summary>True when the server holds the photo.</summary>
     Task<bool> ExistsAsync(string sha256, CancellationToken ct);
 
-    /// <summary>Stores a photo under its hash (content-addressed: nothing happens when it is already there). The caller computed the hash.</summary>
-    Task WriteAsync(string sha256, Stream content, CancellationToken ct);
+    /// <summary>
+    /// Stores a photo under its hash (content-addressed: nothing happens when it is already there). The caller computed
+    /// the hash. False when the photo was not stored (not a JPEG, too large, or not matching its hash).
+    /// </summary>
+    Task<bool> WriteAsync(string sha256, Stream content, CancellationToken ct);
 }

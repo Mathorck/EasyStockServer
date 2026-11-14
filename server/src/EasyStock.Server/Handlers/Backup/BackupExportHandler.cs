@@ -15,7 +15,7 @@ namespace EasyStock.Server.Handlers.Backup;
 /// <summary>
 /// Builds a backup archive of the whole server data: every row of the nine shared tables (soft-deleted ones included),
 /// read in one REPEATABLE READ snapshot, and the photos the articles reference. The archive goes to a temporary file
-/// first (zip needs the sizes), so nothing is held in memory but one table at a time. The server-only tables (users,
+/// first (zip needs the sizes), so tables are streamed row by row and nothing is held in memory but the current row. The server-only tables (users,
 /// sessions, invites, ...) are never part of it. Movements keep <c>created_by</c> and <c>device_id</c>, as the app's
 /// own export does (user ids, no names).
 /// </summary>
@@ -78,25 +78,16 @@ public sealed class BackupExportHandler(
             time.GetUtcNow().UtcDateTime.ToString("yyyy-MM-dd'T'HH:mm:ss'Z'", System.Globalization.CultureInfo.InvariantCulture), counts);
         await WriteJsonAsync(zip, BackupFormatHelper.ManifestEntry, manifest, ct);
 
-        await WriteJsonAsync(zip, BackupTable.Category.Entry(),
-            (await db.Categories.AsNoTracking().OrderBy(x => x.Id).ToListAsync(ct)).Select(x => x.ToRow()), ct);
-        await WriteJsonAsync(zip, BackupTable.AttributeDefinition.Entry(),
-            (await db.AttributeDefinitions.AsNoTracking().OrderBy(x => x.Id).ToListAsync(ct)).Select(x => x.ToRow()), ct);
-        await WriteJsonAsync(zip, BackupTable.CategoryAttribute.Entry(),
-            (await db.CategoryAttributes.AsNoTracking().OrderBy(x => x.Id).ToListAsync(ct)).Select(x => x.ToRow()), ct);
-        await WriteJsonAsync(zip, BackupTable.Location.Entry(),
-            (await db.Locations.AsNoTracking().OrderBy(x => x.Id).ToListAsync(ct)).Select(x => x.ToRow()), ct);
-        await WriteJsonAsync(zip, BackupTable.Article.Entry(),
-            (await db.Articles.AsNoTracking().OrderBy(x => x.Id).ToListAsync(ct))
-                .Select(x => x.ImageSha256 is not null && !available.Contains(x.ImageSha256) ? x.ToRow() with { ImagePath = null } : x.ToRow()), ct);
-        await WriteJsonAsync(zip, BackupTable.Item.Entry(),
-            (await db.Items.AsNoTracking().OrderBy(x => x.Id).ToListAsync(ct)).Select(x => x.ToRow()), ct);
-        await WriteJsonAsync(zip, BackupTable.StockMovement.Entry(),
-            (await db.StockMovements.AsNoTracking().OrderBy(x => x.CreatedAt).ThenBy(x => x.Id).ToListAsync(ct)).Select(x => x.ToRow()), ct);
-        await WriteJsonAsync(zip, BackupTable.StockReview.Entry(),
-            (await db.StockReviews.AsNoTracking().OrderBy(x => x.Id).ToListAsync(ct)).Select(x => x.ToRow()), ct);
-        await WriteJsonAsync(zip, BackupTable.StockReviewLine.Entry(),
-            (await db.StockReviewLines.AsNoTracking().OrderBy(x => x.Id).ToListAsync(ct)).Select(x => x.ToRow()), ct);
+        await WriteRowsAsync(zip, BackupTable.Category, db.Categories.AsNoTracking().OrderBy(x => x.Id), x => x.ToRow(), ct);
+        await WriteRowsAsync(zip, BackupTable.AttributeDefinition, db.AttributeDefinitions.AsNoTracking().OrderBy(x => x.Id), x => x.ToRow(), ct);
+        await WriteRowsAsync(zip, BackupTable.CategoryAttribute, db.CategoryAttributes.AsNoTracking().OrderBy(x => x.Id), x => x.ToRow(), ct);
+        await WriteRowsAsync(zip, BackupTable.Location, db.Locations.AsNoTracking().OrderBy(x => x.Id), x => x.ToRow(), ct);
+        await WriteRowsAsync(zip, BackupTable.Article, db.Articles.AsNoTracking().OrderBy(x => x.Id),
+            x => x.ImageSha256 is not null && !available.Contains(x.ImageSha256) ? x.ToRow() with { ImagePath = null } : x.ToRow(), ct);
+        await WriteRowsAsync(zip, BackupTable.Item, db.Items.AsNoTracking().OrderBy(x => x.Id), x => x.ToRow(), ct);
+        await WriteRowsAsync(zip, BackupTable.StockMovement, db.StockMovements.AsNoTracking().OrderBy(x => x.CreatedAt).ThenBy(x => x.Id), x => x.ToRow(), ct);
+        await WriteRowsAsync(zip, BackupTable.StockReview, db.StockReviews.AsNoTracking().OrderBy(x => x.Id), x => x.ToRow(), ct);
+        await WriteRowsAsync(zip, BackupTable.StockReviewLine, db.StockReviewLines.AsNoTracking().OrderBy(x => x.Id), x => x.ToRow(), ct);
         await tx.RollbackAsync(ct); // read-only: nothing to commit
 
         var written = 0;
@@ -118,5 +109,25 @@ public sealed class BackupExportHandler(
         var entry = zip.CreateEntry(name, CompressionLevel.Optimal);
         await using var target = await entry.OpenAsync(ct);
         await JsonSerializer.SerializeAsync(target, value, BackupFormatHelper.Json, ct);
+    }
+
+    /// <summary>Streams a table as one JSON array (same bytes as serializing the whole list): one row in memory at a time.</summary>
+    private static async Task WriteRowsAsync<TEntity, TRow>(
+        ZipArchive zip, BackupTable table, IQueryable<TEntity> query, Func<TEntity, TRow> toRow, CancellationToken ct)
+    {
+        var entry = zip.CreateEntry(table.Entry(), CompressionLevel.Optimal);
+        await using var target = await entry.OpenAsync(ct);
+        await using var writer = new Utf8JsonWriter(target);
+        writer.WriteStartArray();
+        var pending = 0;
+        await foreach (var x in query.AsAsyncEnumerable().WithCancellation(ct))
+        {
+            JsonSerializer.Serialize(writer, toRow(x), BackupFormatHelper.Json);
+            if (++pending < 256) continue;
+            pending = 0;
+            await writer.FlushAsync(ct);
+        }
+        writer.WriteEndArray();
+        await writer.FlushAsync(ct);
     }
 }

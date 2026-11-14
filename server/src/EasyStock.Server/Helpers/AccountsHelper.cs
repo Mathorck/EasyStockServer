@@ -1,3 +1,4 @@
+using System.Globalization;
 using EasyStock.Server.Configuration;
 using EasyStock.Server.DB.Entities;
 using EasyStock.Server.DB;
@@ -10,7 +11,7 @@ using Microsoft.EntityFrameworkCore;
 namespace EasyStock.Server.Helpers;
 
 /// <summary>Helpers shared by the account services.</summary>
-internal static class AccountsHelper
+public static class AccountsHelper
 {
     public static string KindToWire(this UserKind kind) => kind == UserKind.Guest ? "guest" : "full";
 
@@ -41,13 +42,16 @@ internal static class AccountsHelper
         }
     }
 
-    /// <summary>Trimmed, 1 to 50 characters, otherwise 400 validation-failed.</summary>
+    /// <summary>Trimmed, 1 to 50 characters, no control or format characters, otherwise 400 validation-failed.</summary>
     public static string CleanDisplayName(string? name)
     {
         var trimmed = name?.Trim() ?? "";
-        return trimmed.Length is >= 1 and <= AuthLimitsHelper.DisplayNameMaxLength
-            ? trimmed
-            : throw ProblemException.Validation("displayName", $"Display names are 1 to {AuthLimitsHelper.DisplayNameMaxLength} characters.");
+        if (trimmed.Length is < 1 or > AuthLimitsHelper.DisplayNameMaxLength)
+            throw ProblemException.Validation("displayName", $"Display names are 1 to {AuthLimitsHelper.DisplayNameMaxLength} characters.");
+        // Control (Cc) and format/bidi (Cf) characters could hide or reorder text in the admin screens.
+        if (trimmed.Any(c => char.GetUnicodeCategory(c) is UnicodeCategory.Control or UnicodeCategory.Format))
+            throw ProblemException.Validation("displayName", "Display names cannot contain control or formatting characters.");
+        return trimmed;
     }
 
     public static string CleanDeviceName(string? name)

@@ -236,6 +236,25 @@ namespace EasyStock.Server.DB.Migrations
                     b.ToTable("article", (string)null);
                 });
 
+            modelBuilder.Entity("EasyStock.Server.DB.Entities.AttributeAlias", b =>
+                {
+                    b.Property<Guid>("AliasId")
+                        .HasColumnType("uuid")
+                        .HasColumnName("alias_id");
+
+                    b.Property<Guid>("AttributeId")
+                        .HasColumnType("uuid")
+                        .HasColumnName("attribute_id");
+
+                    b.HasKey("AliasId")
+                        .HasName("pk_attribute_alias");
+
+                    b.HasIndex("AttributeId")
+                        .HasDatabaseName("ix_attribute_alias_attribute_id");
+
+                    b.ToTable("attribute_alias", (string)null);
+                });
+
             modelBuilder.Entity("EasyStock.Server.DB.Entities.AttributeDefinition", b =>
                 {
                     b.Property<Guid>("Id")
@@ -724,6 +743,9 @@ namespace EasyStock.Server.DB.Migrations
                     b.HasIndex("ArticleId")
                         .HasDatabaseName("ix_low_stock_alert_article_id");
 
+                    b.HasIndex("CausedByUserId")
+                        .HasDatabaseName("ix_low_stock_alert_caused_by_user_id");
+
                     b.HasIndex("ServerSeq")
                         .HasDatabaseName("ix_low_stock_alert_server_seq");
 
@@ -1079,6 +1101,11 @@ namespace EasyStock.Server.DB.Migrations
                     b.HasIndex("UpdatedAt")
                         .HasDatabaseName("ix_stock_review_updated_at");
 
+                    b.HasIndex(new[] { "LocationId" }, "ux_stock_review_location_id_open")
+                        .IsUnique()
+                        .HasDatabaseName("ux_stock_review_location_id_open")
+                        .HasFilter("status = 'open' AND deleted_at IS NULL");
+
                     b.ToTable("stock_review", (string)null);
                 });
 
@@ -1201,6 +1228,11 @@ namespace EasyStock.Server.DB.Migrations
                         .HasColumnType("timestamp with time zone")
                         .HasColumnName("received_at");
 
+                    b.Property<byte[]>("RequestHash")
+                        .HasMaxLength(32)
+                        .HasColumnType("bytea")
+                        .HasColumnName("request_hash");
+
                     b.Property<string>("Response")
                         .IsRequired()
                         .HasColumnType("text")
@@ -1232,6 +1264,16 @@ namespace EasyStock.Server.DB.Migrations
                         .HasForeignKey("CategoryId")
                         .OnDelete(DeleteBehavior.Restrict)
                         .HasConstraintName("fk_article_categories_category_id");
+                });
+
+            modelBuilder.Entity("EasyStock.Server.DB.Entities.AttributeAlias", b =>
+                {
+                    b.HasOne("EasyStock.Server.DB.Entities.AttributeDefinition", null)
+                        .WithMany()
+                        .HasForeignKey("AttributeId")
+                        .OnDelete(DeleteBehavior.Restrict)
+                        .IsRequired()
+                        .HasConstraintName("fk_attribute_alias_attribute_definitions_attribute_id");
                 });
 
             modelBuilder.Entity("EasyStock.Server.DB.Entities.CategoryAttribute", b =>
@@ -1305,6 +1347,12 @@ namespace EasyStock.Server.DB.Migrations
                         .OnDelete(DeleteBehavior.Restrict)
                         .IsRequired()
                         .HasConstraintName("fk_low_stock_alert_article_article_id");
+
+                    b.HasOne("EasyStock.Server.DB.Entities.AppUser", null)
+                        .WithMany()
+                        .HasForeignKey("CausedByUserId")
+                        .OnDelete(DeleteBehavior.SetNull)
+                        .HasConstraintName("fk_low_stock_alert_users_caused_by_user_id");
                 });
 
             modelBuilder.Entity("EasyStock.Server.DB.Entities.LowStockState", b =>

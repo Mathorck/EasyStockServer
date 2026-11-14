@@ -9,7 +9,11 @@ namespace EasyStock.Server.Tests.Infrastructure;
 /// <summary>One PostgreSQL container shared by the whole test run. Needs Docker.</summary>
 public sealed class PostgresFixture : IAsyncLifetime
 {
-    private readonly PostgreSqlContainer _container = new PostgreSqlBuilder("postgres:16-alpine").Build();
+    // Every database from CreateDatabaseAsync gets its own Npgsql pool, whose idle connections stay open:
+    // the default limit of 100 runs out when the test classes run in parallel.
+    private readonly PostgreSqlContainer _container = new PostgreSqlBuilder("postgres:16-alpine")
+        .WithCommand("-c", "max_connections=1000")
+        .Build();
 
     // CREATE DATABASE copies template1 and fails while another CREATE DATABASE is using it.
     private readonly SemaphoreSlim _create = new(1, 1);

@@ -20,7 +20,7 @@ public sealed class BackupImportHandler(
     ILogger<BackupImportHandler> logger)
 {
     /// <summary>Server-only tables that hold references to the shared data and are emptied with it on a replace.</summary>
-    private static readonly string[] DerivedTables = ["low_stock_alert", "low_stock_state"];
+    private static readonly string[] DerivedTables = ["low_stock_alert", "low_stock_state", "attribute_alias"];
 
     public async Task<BackupImportResult> ImportAsync(Stream file, BackupImportMode mode, Guid userId, CancellationToken ct)
     {
@@ -28,7 +28,9 @@ public sealed class BackupImportHandler(
         BackupValidatorHelper.Validate(archive.Data);
         var incoming = archive.Data;
 
-        // Photo path in the archive -> SHA-256 of its bytes (only the ones an article refers to).
+        // Photo path in the archive -> SHA-256 of its bytes (only the ones an article refers to). Hashing checks every
+        // photo (JPEG, within the image store's size limit) before any is written: a photo that cannot be stored
+        // refuses the whole backup, so no article is left pointing at a photo the server does not hold.
         var pathToSha = new Dictionary<string, string>(StringComparer.Ordinal);
         foreach (var path in incoming.ImagePaths())
             if (await archive.HashPhotoAsync(path, ct) is { } sha) pathToSha[path] = sha;
@@ -38,7 +40,7 @@ public sealed class BackupImportHandler(
             if (await images.ExistsAsync(sha, ct)) continue;
             await using var photo = await archive.OpenPhotoAsync(path, ct);
             if (photo is null) continue;
-            await images.WriteAsync(sha, photo, ct);
+            if (!await images.WriteAsync(sha, photo, ct)) throw new BackupException(BackupError.Damaged, "A photo could not be stored");
             stored++;
         }
 

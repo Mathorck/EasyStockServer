@@ -1,3 +1,4 @@
+using EasyStock.Server.DB;
 using EasyStock.Server.Helpers;
 using EasyStock.Server.Filters;
 using EasyStock.Server.Interfaces;
@@ -11,7 +12,8 @@ namespace EasyStock.Server.Controllers;
 // No [Produces]: it would rewrite the problem+json content type of the 400 answer.
 [ApiController]
 [Route("api/v1/sync/pull")]
-public sealed class SyncPullController(PullHandler builder, DatasetEpochHandler epochs, ICurrentUser user) : ControllerBase
+public sealed class SyncPullController(
+    PullHandler builder, DatasetEpochHandler epochs, ICurrentUser user, EasyStockDbContext db) : ControllerBase
 {
     /// <summary>
     /// Rows with server_seq greater than <paramref name="since"/>, at most <paramref name="limit"/> (default 500,
@@ -49,6 +51,15 @@ public sealed class SyncPullController(PullHandler builder, DatasetEpochHandler 
         var epoch = await epochs.GetAsync(ct);
         if (!DatasetEpochHandler.Accepts(datasetEpoch, epoch))
             return ProblemTypesHelper.DatasetResetProblem(epoch);
+        // A Guest just promoted holds a Guest-filtered copy: the same reset, with the unchanged epoch, makes this
+        // phone pull everything from 0 (FullPullMarkHelper). Only checked for a full account: a request still
+        // authenticated as a Guest neither trips nor clears the mark.
+        if (!user.IsGuest)
+        {
+            if (since > 0 && await FullPullMarkHelper.IsMarkedAsync(db, user.SessionId, ct))
+                return ProblemTypesHelper.DatasetResetProblem(epoch);
+            if (since == 0) await FullPullMarkHelper.ClearAsync(db, user.SessionId, ct);
+        }
         return Ok(await builder.BuildAsync(user, since, limit, epoch, ct));
     }
 }

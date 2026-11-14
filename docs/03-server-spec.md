@@ -62,12 +62,13 @@ What the optional EasyStock server is, how it is built, and how it behaves. The 
 ## Server-only tables
 
 * `users` (Identity table, extended): display name, role, kind (`full` or `guest`), short code, created at, last seen, disabled at.
-* `device_session`: ID, user ID, device name, refresh token hash, previous token hash (for reuse detection), created at, last used, revoked at.
+* `device_session`: ID, user ID, device name, refresh token hash, previous token hash (for reuse detection and its grace window), created at, last used, revoked at.
 * `invite`: token hash, role, created by, created at, expires at, used at.
 * `public_invite` (one row): token hash, enabled, Guest limit, created at.
 * `promotion`: user ID, target role, created by, created at, expires at, completed or cancelled at.
 * `password_reset`: token hash, user ID, created at, expires at, used at.
-* `sync_batch`: batch ID, device session ID, received at, and the saved response, so a repeated batch gets the same answer.
+* `sync_batch`: batch ID, device session ID, received at, a hash of the rows, and the saved response, so a repeated batch gets the same answer (the same ID with other rows gets 409 `batch-id-reused`).
+* `attribute_alias`: attribute IDs merged into the server attribute with the same key, so later batches using the old ID are redirected.
 * `low_stock_alert`: ID, article ID, crossed at, stock at that moment, caused by user ID, `server_seq`.
 * `low_stock_state`: article ID and whether it is currently at or below its threshold, used to detect crossings.
 * `push_registration`: device session ID and UnifiedPush endpoint URL.
@@ -92,7 +93,8 @@ What the optional EasyStock server is, how it is built, and how it behaves. The 
 * No email address is stored.
 * Passwords need at least 10 characters and at most 128, with no other rule.
 * Passwords are hashed by Identity's default password hasher.
-* An account locks for 15 minutes after 5 failed passwords.
+* An account locks for 15 minutes after 5 failed passwords. Wrong current passwords on `POST /me/password` count too.
+* Login answers `invalid-credentials` alike for an unknown user, a wrong password and a locked account, so it never tells whether an account exists.
 * Guest accounts have no username and no password hash.
 * The short code is 6 characters from an alphabet without look-alike characters (no 0/O, 1/I), derived from the user ID.
 
@@ -104,16 +106,18 @@ What the optional EasyStock server is, how it is built, and how it behaves. The 
 
 ### Refresh tokens
 
-* 32 random bytes, encoded in Base64URL, sent to the phone once and stored only as a SHA-256 hash.
-* Each refresh returns a new refresh token and keeps the old hash as "previous".
-* If a phone presents the previous token again, the session is revoked, since this means the token was copied.
+* The session ID (16 bytes), a nonce (32 bytes) and a 16-byte HMAC tag, encoded in Base64URL. Sent to the phone once and stored only as a SHA-256 hash. The tag key is derived from the signing key, so only the server can make a token that names a session.
+* Each refresh returns a new refresh token and keeps the old hash as "previous". The new token is derived from the session ID and the old hash; the first one has a random nonce.
+* If a phone presents any replaced token of the session (the previous one or an older one), the session is revoked, since this means the token was copied.
+* Grace window: the previous token presented again within 10 seconds of the rotation returns the current refresh token again (with a new access token) and does not revoke. This covers two refreshes sent at once and a retry after a lost answer.
+* A token with a bad tag, or one issued before the signing key was replaced, is only looked up by hash: it cannot revoke a session.
 * A session expires after 90 days without use.
 * Revoking a session sets `revoked_at`; the next refresh answers 401 with the problem type `session-revoked`.
 * Disabling a user revokes all their sessions.
 
 ### Rate limits
 
-* Login, setup, invite redeem, reset and promotion endpoints: 10 requests per minute per IP address.
+* Login, setup, invite redeem, reset, promotion and password change endpoints: 10 requests per minute per IP address.
 * Guest signup: 5 accounts per hour per IP address, and the Guest limit set by the Admin.
 * Other endpoints: 120 requests per minute per device session.
 
@@ -236,14 +240,15 @@ Pull answer:
 * A different value gets 409 `dataset-reset`, with the current epoch as `datasetEpoch` in the problem body. The batch is not applied.
 * A missing or empty header is accepted, for a first sync and for older apps. Such a phone is not protected against a replace.
 * On 409 `dataset-reset` the app deletes its server-mode synced rows and cursor, stores the new epoch, and pulls from `since=0`.
+* After a Guest is promoted, the server marks that session: its next pull gets 409 `dataset-reset` with the unchanged epoch, so the app re-pulls everything it can now see. The mark is cleared by that answer.
 * A push refused with 409 is neither applied nor recorded. The app drops it: its rows belong to the old dataset (they can bring back rows the restore removed, or point to rows that no longer exist).
 * Before wiping, the app tells the user how many local changes were not sent ("The server data was restored by an Admin: N unsent changes were discarded").
-* The server keeps the epoch in memory and reads the database only at start; push checks it again from the database under the sync lock.
+* The server caches the epoch in memory. It is loaded from the database at start (created there if missing) and updated after a replace import commits. `GET /sync/pull`, `POST /sync/push` and `GET /server-info` use the cached value. Push also re-reads it from the database under the sync lock, before the replay lookup, so a push that waited on an import does not apply to the new dataset.
 
 ### Images
 
 * `HEAD /images/{sha256}` answers 200 if the server has the photo, 404 if not.
-* `PUT /images/{sha256}` stores a JPEG of at most 5 MB, after checking that its hash matches the URL.
+* `PUT /images/{sha256}` stores a JPEG of at most 5 MB (it must start with the SOI marker and end with the EOI marker), after checking that its hash matches the URL. Past the total `EASYSTOCK_IMAGE_QUOTA_MB` (default 2048) it answers 413 `image-quota-exceeded`.
 * `GET /images/{sha256}` returns the photo, with a long cache time since the content never changes.
 * Members and Admins can upload; every role can download.
 
@@ -290,6 +295,7 @@ Pull answer:
   * A new ID is never a conflict. A `baseSeq` that is not a whole number is `invalid`.
   * `conflict` is also the reason of the rare database-level failure the checks missed.
 * `attribute_definition.key` cannot change once created: a different key for the same ID keeps the server's key (`ATTRIBUTE_KEY_KEPT`).
+* A movement is never changed: a push with an existing movement ID and the same content is `accepted`, with different content it is `changed` with `conflict` `MOVEMENT_KEPT` and the server's movement as `row`.
 * Only one open `stock_review` per location: a second one is rejected.
 * Every accepted or changed row gets a new `server_seq`, returned as `serverSeq` in its result.
 
@@ -372,7 +378,7 @@ Pull answer:
 ## Tests
 
 * Integration tests run the real API against PostgreSQL in Testcontainers.
-* Auth: setup once only, invite redeem, expired and reused invites, login lockout, refresh rotation, refresh reuse revokes the session, revoked session answers `session-revoked`.
+* Auth: setup once only, invite redeem, expired and reused invites, login lockout, refresh rotation, refresh reuse revokes the session (the previous token or an older one), the previous token replayed within the grace window returns the same token, a forged tag does not revoke, revoked session answers `session-revoked`.
 * Guest: signup off, signup on, Guest limit, IP limit, the public token cannot create anything above Guest, regenerate makes the old token fail.
 * Promotion: short code must match, pending Guest keeps Guest rights, password sets the role, 7-day expiry, cancel.
 * Roles: for each of the four roles, every endpoint and every table in a push answers as `Permissions.cs` says.

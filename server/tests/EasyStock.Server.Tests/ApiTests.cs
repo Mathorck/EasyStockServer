@@ -1,5 +1,6 @@
 using System.Net;
 using System.Text.Json;
+using EasyStock.Server.Configuration;
 using EasyStock.Server.Tests.Infrastructure;
 using Xunit;
 
@@ -42,6 +43,34 @@ public sealed class ApiTests(PostgresFixture pg) : IDisposable
         using var doc = JsonDocument.Parse(await response.Content.ReadAsStringAsync(ct));
         Assert.Equal("app-too-old", doc.RootElement.GetProperty("type").GetString());
     }
+
+    [Fact]
+    public async Task The_426_carries_minAppVersion_and_supportedSchemaVersions()
+    {
+        var response = await _factory.CreateClient().GetAsync("/api/v1/anything", TestContext.Current.CancellationToken);
+        using var doc = JsonDocument.Parse(await response.Content.ReadAsStringAsync(TestContext.Current.CancellationToken));
+        Assert.Equal("0.0.0", doc.RootElement.GetProperty("minAppVersion").GetString());
+        Assert.Equal([10, 11], doc.RootElement.GetProperty("supportedSchemaVersions").EnumerateArray().Select(e => e.GetInt32()));
+    }
+
+    [Theory]
+    [InlineData("1.0", "1.0.0")]
+    [InlineData("1", "1.0.0")]
+    [InlineData("1.2.3-beta.1", "1.2.3")]
+    [InlineData("1.2.3+build5", "1.2.3")]
+    [InlineData("2.10", "2.10.0")]
+    public void ParseVersion_normalizes_to_three_parts_and_drops_suffixes(string input, string expected) =>
+        Assert.Equal(Version.Parse(expected), VersionHeaderMiddleware.ParseVersion(input));
+
+    [Theory]
+    [InlineData("")]
+    [InlineData("abc")]
+    [InlineData("1.2.3.4")]
+    [InlineData("1..2")]
+    [InlineData("-beta")]
+    [InlineData("-1.0.0")]
+    public void ParseVersion_rejects_malformed_input(string input) =>
+        Assert.Null(VersionHeaderMiddleware.ParseVersion(input));
 
     [Fact]
     public async Task Unsupported_schema_version_gives_426()

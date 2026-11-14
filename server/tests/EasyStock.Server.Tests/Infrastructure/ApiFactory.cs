@@ -1,5 +1,6 @@
 using System.Net;
 using System.Net.Http.Headers;
+using EasyStock.Server.Handlers.Cleanup;
 using Microsoft.AspNetCore.Builder;
 using Microsoft.AspNetCore.Hosting;
 using Microsoft.AspNetCore.Http;
@@ -16,7 +17,8 @@ public sealed class ApiFactory(
     string? db,
     string? publicUrl = "https://stock.example.org",
     IReadOnlyDictionary<string, string>? settings = null,
-    string? dataDir = null) : WebApplicationFactory<Program>
+    string? dataDir = null,
+    bool cleanupJob = false) : WebApplicationFactory<Program>
 {
     /// <summary>Test header holding the TCP peer address of a request (the test server has none).</summary>
     public const string RemoteIpHeader = "X-Test-Remote-Ip";
@@ -41,6 +43,10 @@ public sealed class ApiFactory(
             builder.UseSetting(key, value);
         builder.ConfigureTestServices(services =>
         {
+            // Tests move the clock by months: a running cleanup job would delete the rows they rely on.
+            if (!cleanupJob)
+                foreach (var d in services.Where(d => d.ImplementationType == typeof(CleanupService)).ToList())
+                    services.Remove(d);
             services.RemoveAll<TimeProvider>();
             services.AddSingleton<TimeProvider>(Time);
             services.AddSingleton<ILogEventSink>(Logs);

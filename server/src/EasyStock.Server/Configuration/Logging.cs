@@ -47,7 +47,9 @@ public static class Logging
                 .Enrich.FromLogContext()
                 .WriteTo.Console();
 
-            // SQL text never reaches the log, whatever the configuration says.
+            // Successful SQL commands (text and timing, logged at Information and below) never reach the log,
+            // whatever the configuration says. EF Core still reports failing commands at Error, and those
+            // entries can include the command text; parameter values are not logged (no sensitive data logging).
             log.MinimumLevel.Override(SqlCommandCategory, LogEventLevel.Warning);
         },
         // Each host keeps its own logger instead of the static Log.Logger, so hosts running side by side (tests)

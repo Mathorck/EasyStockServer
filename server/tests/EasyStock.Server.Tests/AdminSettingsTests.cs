@@ -133,6 +133,23 @@ public sealed class AdminSettingsTests(PostgresFixture pg) : IAsyncLifetime
     }
 
     [Fact]
+    public async Task Server_info_reports_the_saved_name_and_falls_back_to_the_default()
+    {
+        var ct = TestContext.Current.CancellationToken;
+        var anonymous = _factory.CreateClient();
+        async Task<string?> NameAsync()
+        {
+            using var doc = JsonDocument.Parse(await anonymous.GetStringAsync("/api/v1/server-info", ct));
+            return doc.RootElement.GetProperty("serverName").GetString();
+        }
+
+        Assert.Equal("EasyStock", await NameAsync());
+        var put = await (await Client(Role.Admin)).PutAsJsonAsync(Url, new { serverName = "Warehouse 7" }, ct);
+        Assert.Equal(HttpStatusCode.OK, put.StatusCode);
+        Assert.Equal("Warehouse 7", await NameAsync());
+    }
+
+    [Fact]
     public async Task Unknown_key_is_rejected_with_validation_failed()
     {
         var ct = TestContext.Current.CancellationToken;
@@ -177,6 +194,21 @@ public sealed class AdminSettingsTests(PostgresFixture pg) : IAsyncLifetime
         // Only the Admin settings: the dataset_epoch row is shared with every host on this database.
         await db.Set<Setting>().Where(s => s.Key == "server_name")
             .ExecuteDeleteAsync(TestContext.Current.CancellationToken);
+    }
+
+    [Fact]
+    public async Task Concurrent_first_saves_do_not_fail()
+    {
+        var ct = TestContext.Current.CancellationToken;
+        await ResetAsync();
+        var tasks = Enumerable.Range(0, 8).Select(async i =>
+        {
+            using var scope = _factory.Services.CreateScope();
+            var handler = scope.ServiceProvider.GetRequiredService<EasyStock.Server.Handlers.Settings.SettingsHandler>();
+            await handler.SaveAsync(new EasyStock.Server.Models.ServerSettings($"Shop {i}"), ct);
+        });
+        await Task.WhenAll(tasks);
+        Assert.StartsWith("Shop ", await StoredServerNameAsync(ct));
     }
 
     private async Task<string?> StoredServerNameAsync(CancellationToken ct)

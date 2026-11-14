@@ -77,6 +77,37 @@ public sealed class MeTests(PostgresFixture pg) : IDisposable
     }
 
     [Fact]
+    public async Task Wrong_current_passwords_share_the_login_lockout()
+    {
+        var user = await _factory.CreateUserAsync();
+        Task<HttpResponseMessage> Change(string current) => _factory.CreateVersionedClient(user.AccessToken)
+            .PostAsJsonAsync("/api/v1/me/password", new { currentPassword = current, newPassword = "another password" }, Ct);
+
+        for (var i = 0; i < 4; i++)
+            await (await Change("wrong password")).Problem(HttpStatusCode.BadRequest, "invalid-credentials");
+        // The fifth failure is a login: both count toward the same limit.
+        await (await _factory.LoginAsync(user.Username, "wrong password")).Problem(HttpStatusCode.Unauthorized, "invalid-credentials");
+
+        var locked = await (await Change(user.Password)).Problem(HttpStatusCode.TooManyRequests, "rate-limited");
+        Assert.True(locked.GetProperty("retryAfter").GetInt32() > 0);
+        await (await _factory.LoginAsync(user.Username, user.Password)).Problem(HttpStatusCode.Unauthorized, "invalid-credentials");
+
+        _factory.Time.Advance(TimeSpan.FromMinutes(15) + TimeSpan.FromSeconds(1));
+        Assert.Equal(HttpStatusCode.NoContent, (await Change(user.Password)).StatusCode);
+    }
+
+    [Fact]
+    public async Task Change_password_allows_10_requests_per_minute_per_ip()
+    {
+        var user = await _factory.CreateUserAsync();
+        var client = _factory.CreateVersionedClient(user.AccessToken);
+        for (var i = 0; i < 10; i++)
+            await client.PostAsJsonAsync("/api/v1/me/password", new { currentPassword = "x", newPassword = "short" }, Ct);
+        await (await client.PostAsJsonAsync("/api/v1/me/password", new { currentPassword = "x", newPassword = "short" }, Ct))
+            .Problem(HttpStatusCode.TooManyRequests, "rate-limited");
+    }
+
+    [Fact]
     public async Task Me_needs_a_valid_token()
     {
         var anonymous = await _factory.CreateVersionedClient().GetAsync("/api/v1/me", Ct);

@@ -51,6 +51,7 @@ public sealed partial class PullHandler(
         var candidates = new List<Candidate>(take * 4);
         List<Candidate> kept;
         List<SyncPullUser> users;
+        bool receivesAlerts;
         await using (var tx = await db.Database.BeginTransactionAsync(IsolationLevel.RepeatableRead, ct))
         {
             // Must be the first statement of the transaction.
@@ -75,6 +76,8 @@ public sealed partial class PullHandler(
             kept = candidates.Count > limit ? candidates.GetRange(0, limit) : candidates;
 
             users = await UsersAsync(kept, ct);
+            // Same snapshot as the alerts it filters.
+            receivesAlerts = await ReceivesAlertsAsync(caller, kept.Exists(c => c.Table == Alerts), ct);
             await tx.CommitAsync(ct);
         }
 
@@ -83,7 +86,6 @@ public sealed partial class PullHandler(
 
         var rows = new Dictionary<string, List<JsonObject>>();
         var alerts = new List<SyncPullAlert>();
-        var receivesAlerts = await ReceivesAlertsAsync(caller, kept.Exists(c => c.Table == Alerts), ct);
         foreach (var c in kept)
         {
             switch (c.Table)

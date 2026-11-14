@@ -19,6 +19,10 @@ export EASYSTOCK_E2E_PORT="$port"
 export POSTGRES_PASSWORD="e2e-$(od -An -N8 -tx1 /dev/urandom | tr -d ' \n')"
 export EASYSTOCK_PUBLIC_URL="$url"
 export EASYSTOCK_LOG_LEVEL="${EASYSTOCK_LOG_LEVEL:-Information}"
+# Test-only values. docker compose also reads server/.env, so a real fingerprint or proxy list there would
+# otherwise end up in the test server. Variables set here win over the .env file.
+export EASYSTOCK_CERT_FINGERPRINT=""
+export EASYSTOCK_TRUSTED_PROXIES=""
 
 compose=(docker compose -p "$project" -f "$server/docker-compose.yml" -f "$here/compose.e2e.yml")
 # Leftovers of an earlier run that was not stopped
@@ -27,7 +31,7 @@ echo "$project" >"$run_dir/project"
 
 echo "Building and starting the server on $url ..."
 if ! "${compose[@]}" up -d --build --wait --wait-timeout 180; then
-    "${compose[@]}" logs --no-color server >"$run_dir/server.log" 2>&1 || true
+    "${compose[@]}" logs --no-color server 2>&1 | sed -E 's/(Setup token: )[A-Za-z0-9_-]+/\1[redacted]/' >"$run_dir/server.log" || true
     echo "The server did not become healthy, see $run_dir/server.log" >&2
     exit 1
 fi
@@ -43,6 +47,9 @@ if [ -z "$token" ]; then
     echo "No setup token in the server log" >&2
     exit 1
 fi
+
+# Keep the token out of the GitHub Actions step logs too
+[ -z "${GITHUB_ACTIONS:-}" ] || echo "::add-mask::$token"
 
 cat >"$run_dir/server.env" <<ENV
 EASYSTOCK_E2E_URL=$url

@@ -25,6 +25,11 @@ public sealed class MigrationTests(PostgresFixture pg)
     public void Unreachable_database_fails_startup()
     {
         using var factory = new ApiFactory("Host=127.0.0.1;Port=1;Database=x;Timeout=2");
-        Assert.NotNull(Record.Exception(() => factory.CreateClient()));
+        var ex = Record.Exception(() => factory.CreateClient());
+        Assert.NotNull(ex);
+        // The migration's connection attempt fails: an Npgsql error somewhere in the chain, not any startup bug.
+        var chain = new List<Exception>();
+        for (var e = ex; e != null; e = e.InnerException) chain.Add(e);
+        Assert.Contains(chain, e => e is Npgsql.NpgsqlException);
     }
 }

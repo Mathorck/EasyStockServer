@@ -10,6 +10,12 @@ public static class AuthLimitsHelper
     /// <summary>A refresh token not used for this long ends its session.</summary>
     public static readonly TimeSpan RefreshIdleLifetime = TimeSpan.FromDays(90);
 
+    /// <summary>
+    /// How long after a rotation the replaced refresh token still answers with the new pair instead of revoking
+    /// the session: covers two refreshes sent at once and a retry after a lost answer.
+    /// </summary>
+    public static readonly TimeSpan RefreshReuseGrace = TimeSpan.FromSeconds(10);
+
     /// <summary>last_used_at and last_seen_at are written at most this often.</summary>
     public static readonly TimeSpan ActivityWriteInterval = TimeSpan.FromMinutes(5);
 

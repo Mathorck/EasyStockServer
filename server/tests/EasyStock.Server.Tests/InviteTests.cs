@@ -50,6 +50,29 @@ public sealed class InviteTests(PostgresFixture pg) : IDisposable
     }
 
     [Fact]
+    public async Task Expired_invite_creates_no_account_and_stays_expired()
+    {
+        var invite = await _factory.CreateInviteAsync(Role.Member);
+        var username = AuthHelpers.UniqueName();
+        _factory.Time.Advance(AuthLimitsHelper.InviteLifetime + TimeSpan.FromMinutes(1));
+
+        await (await Redeem(invite.Token, username)).Problem(HttpStatusCode.Gone, "invite-expired");
+        await (await Redeem(invite.Token, username)).Problem(HttpStatusCode.Gone, "invite-expired");
+
+        // No account was made, so the name is free: a valid invite can still take it.
+        var fresh = await _factory.CreateInviteAsync(Role.Member);
+        Assert.Equal(HttpStatusCode.OK, (await Redeem(fresh.Token, username)).StatusCode);
+    }
+
+    [Fact]
+    public async Task Invite_still_works_just_before_it_expires()
+    {
+        var invite = await _factory.CreateInviteAsync(Role.Member);
+        _factory.Time.Advance(AuthLimitsHelper.InviteLifetime - TimeSpan.FromMinutes(1));
+        Assert.Equal(HttpStatusCode.OK, (await Redeem(invite.Token)).StatusCode);
+    }
+
+    [Fact]
     public async Task Unknown_or_cancelled_invite_is_invalid()
     {
         await (await Redeem(SecretTokensHelper.New())).Problem(HttpStatusCode.NotFound, "invite-invalid");

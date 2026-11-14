@@ -104,6 +104,19 @@ public sealed class DatasetEpochTests(PostgresFixture pg) : IAsyncLifetime
     }
 
     [Fact]
+    public async Task A_blank_header_counts_as_absent()
+    {
+        var f = await FreshAsync();
+        var member = await f.SignInAsync(Role.Member);
+        var client = f.ClientFor(member);
+        client.DefaultRequestHeaders.TryAddWithoutValidation(Header, "   ");
+
+        Assert.Equal(HttpStatusCode.OK, (await Pull(client)).StatusCode);
+        Assert.Equal(HttpStatusCode.OK, (await EmptyPush(client)).Status);
+        Assert.True(DatasetEpochHandler.Accepts("  ", "abc"));
+    }
+
+    [Fact]
     public async Task A_different_header_gets_409_dataset_reset_on_pull_and_push()
     {
         var f = await FreshAsync();

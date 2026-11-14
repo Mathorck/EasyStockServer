@@ -23,9 +23,9 @@ public sealed class DatasetEpochHandler(IServiceScopeFactory scopes) : IHostedSe
     public ValueTask<string> GetAsync(CancellationToken ct) =>
         Volatile.Read(ref _current) is { } epoch ? ValueTask.FromResult(epoch) : new ValueTask<string>(LoadAsync(ct));
 
-    /// <summary>A missing or empty header is accepted (first sync, older app); anything else must equal the epoch.</summary>
+    /// <summary>A missing, empty or whitespace-only header counts as absent and is accepted (first sync, older app); anything else must equal the epoch.</summary>
     public static bool Accepts(string? header, string current) =>
-        string.IsNullOrEmpty(header) || string.Equals(header.Trim(), current, StringComparison.OrdinalIgnoreCase);
+        string.IsNullOrWhiteSpace(header) || string.Equals(header.Trim(), current, StringComparison.OrdinalIgnoreCase);
 
     /// <summary>The stored epoch, read in the caller's transaction (null if the row is missing).</summary>
     public async Task<string?> ReadAsync(EasyStockDbContext db, CancellationToken ct)

@@ -75,4 +75,19 @@ public sealed class RateLimitTests(PostgresFixture pg)
         for (var i = 0; i < 12; i++)
             Assert.Equal(HttpStatusCode.Unauthorized, (await Login(Forwarded(factory, "10.250.3.4", ApiFactory.RandomIp()))).StatusCode);
     }
+
+    [Fact]
+    public async Task Forwarded_address_is_the_partition_key_behind_a_trusted_proxy()
+    {
+        using var factory = new ApiFactory(pg.ConnectionString,
+            settings: new Dictionary<string, string> { ["EASYSTOCK_TRUSTED_PROXIES"] = "10.250.0.0/16" });
+        var client = ApiFactory.RandomIp();
+        // The same forwarded client, through different proxy addresses: one partition.
+        for (var i = 0; i < 10; i++)
+            Assert.Equal(HttpStatusCode.Unauthorized, (await Login(Forwarded(factory, $"10.250.3.{i + 1}", client))).StatusCode);
+        Assert.Equal(HttpStatusCode.TooManyRequests, (await Login(Forwarded(factory, "10.250.9.9", client))).StatusCode);
+
+        // Another forwarded client behind the same proxy has its own budget.
+        Assert.Equal(HttpStatusCode.Unauthorized, (await Login(Forwarded(factory, "10.250.3.1", ApiFactory.RandomIp()))).StatusCode);
+    }
 }

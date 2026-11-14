@@ -23,6 +23,7 @@ public sealed class AdminBackupController(
     /// <summary>A backup of all the shared data and its photos, in the app's backup format (plain zip).</summary>
     [HttpGet]
     [Produces("application/octet-stream")]
+    [ProducesResponseType<FileResult>(StatusCodes.Status200OK, "application/octet-stream")]
     public async Task<IActionResult> Export(CancellationToken ct)
     {
         var backup = await exporter.ExportAsync(user.UserId, ct);
@@ -33,6 +34,11 @@ public sealed class AdminBackupController(
     [HttpPost]
     [Consumes("application/octet-stream", "application/zip", "application/x-zip-compressed", "application/x-www-form-urlencoded", "text/plain")]
     [RequestSizeLimit(BackupFormatHelper.MaxUploadBytes)]
+    [RawBody("application/octet-stream", "application/zip", Description = "The backup zip.")]
+    [ProducesResponseType<BackupImportResult>(StatusCodes.Status200OK)]
+    [ProducesResponseType<ProblemDetails>(StatusCodes.Status400BadRequest, ProblemTypesHelper.ContentType)]
+    [ProducesResponseType<ProblemDetails>(StatusCodes.Status413PayloadTooLarge, ProblemTypesHelper.ContentType)]
+    [ProducesResponseType<ProblemDetails>(StatusCodes.Status422UnprocessableEntity, ProblemTypesHelper.ContentType)]
     public async Task<IActionResult> Import([FromQuery] string? mode, CancellationToken ct)
     {
         BackupImportMode parsed;

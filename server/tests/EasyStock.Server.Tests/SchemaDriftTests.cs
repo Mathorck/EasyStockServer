@@ -28,8 +28,14 @@ public sealed partial class SchemaDriftTests(PostgresFixture pg)
         // Push registration
         "push_registration",
         // Sync push and low-stock alerts
-        "sync_batch", "low_stock_state", "low_stock_alert",
+        "sync_batch", "low_stock_state", "low_stock_alert", "attribute_alias",
     ];
+
+    /// <summary>
+    /// Unique indexes the server adds on purpose. stock_review(location_id) is partial (open, not deleted): the dbml's
+    /// "at most one open review per location (checked by the app)", which push enforces too (review-open).
+    /// </summary>
+    private static readonly HashSet<(string Table, string Columns)> ServerOnlyUniqueIndexes = [("stock_review", "location_id")];
 
     [Fact]
     public void Supported_schema_versions_contain_the_apps_db_version()
@@ -40,17 +46,26 @@ public sealed partial class SchemaDriftTests(PostgresFixture pg)
         Assert.Contains(int.Parse(m.Groups[1].Value), EasyStock.Server.Helpers.CompatHelper.SupportedSchemaVersions);
     }
 
-    public static string FindAppFile(string relative)
+    /// <summary>The app repository's file, or null when the sibling repository isn't there.</summary>
+    public static string? TryFindAppFile(string relative)
     {
         var env = Environment.GetEnvironmentVariable("EASYSTOCK_APP_DIR");
-        if (!string.IsNullOrEmpty(env)) return Path.Combine(env, relative);
+        if (!string.IsNullOrEmpty(env)) return File.Exists(Path.Combine(env, relative)) ? Path.Combine(env, relative) : null;
         for (var dir = new DirectoryInfo(AppContext.BaseDirectory); dir != null; dir = dir.Parent)
         {
             var candidate = Path.Combine(dir.FullName, "EasyStock", relative);
             if (File.Exists(candidate)) return candidate;
         }
-        throw new FileNotFoundException(
-            $"App repository not found: put it next to this repository as ../EasyStock or set EASYSTOCK_APP_DIR ({relative}).");
+        return null;
+    }
+
+    /// <summary>The app repository's file; skips the test when the app repository is absent.</summary>
+    public static string FindAppFile(string relative)
+    {
+        var path = TryFindAppFile(relative);
+        if (path == null)
+            Assert.Skip($"App repository not found: put it next to this repository as ../EasyStock or set EASYSTOCK_APP_DIR ({relative}).");
+        return path!;
     }
 
     [Fact]
@@ -102,7 +117,7 @@ public sealed partial class SchemaDriftTests(PostgresFixture pg)
             var have = dbIndexes.GetValueOrDefault(table) ?? [];
             foreach (var index in indexes.Where(i => !have.Contains(i)))
                 problems.Add($"missing {(index.Unique ? "unique " : "")}index {table}({index.Columns})");
-            foreach (var extra in have.Where(i => i.Unique && !indexes.Contains(i)))
+            foreach (var extra in have.Where(i => i.Unique && !indexes.Contains(i) && !ServerOnlyUniqueIndexes.Contains((table, i.Columns))))
                 problems.Add($"extra unique index {table}({extra.Columns}) (not in schema.dbml)");
         }
 

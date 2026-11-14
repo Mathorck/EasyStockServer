@@ -23,6 +23,9 @@ public static class BackupFormatHelper
     /// </summary>
     public static int ExportSchemaVersion => CompatHelper.SupportedSchemaVersions.Min();
 
+    /// <summary>Lowest schema version accepted when importing a backup: the oldest supported app's.</summary>
+    public static int MinImportSchemaVersion => CompatHelper.SupportedSchemaVersions.Min();
+
     /// <summary>Highest schema version accepted when importing a backup: the newest supported app's.</summary>
     public static int MaxImportSchemaVersion => CompatHelper.SupportedSchemaVersions.Max();
 
@@ -30,13 +33,31 @@ public static class BackupFormatHelper
     public const string ManifestEntry = "manifest.json";
     public const string ImagesDir = "images";
 
-    public const long MaxManifestBytes = 64L * 1024;
-    /// <summary>The app limits a table to 64 MB; the server reads it as a stream and accepts more (a long history of movements).</summary>
-    public const long MaxTableBytes = 1024L * 1024 * 1024;
-    public const long MaxImageBytes = 32L * 1024 * 1024;
-
     /// <summary>Upload limit of <c>POST /admin/backup</c> only (docs/04, Phase 11).</summary>
     public const long MaxUploadBytes = 500L * 1024 * 1024;
+
+    public const long MaxManifestBytes = 64L * 1024;
+
+    /// <summary>
+    /// Decompressed size of one table. The app limits a table to 64 MB; the server accepts more (a long history of
+    /// movements). Each table is read whole into memory, so the limit stays well below the total.
+    /// </summary>
+    public const long MaxTableBytes = 256L * 1024 * 1024;
+
+    /// <summary>
+    /// Decompressed size of one photo: the image store's limit (<c>PUT /images</c>). A larger photo could not be stored,
+    /// so the backup is refused rather than imported with a photo reference that leads nowhere.
+    /// </summary>
+    public const long MaxImageBytes = Handlers.Images.ImageHandler.MaxBytes;
+
+    /// <summary>
+    /// Decompressed bytes read from one archive in all (manifest, tables and photos), so a small upload cannot expand
+    /// into gigabytes. Photos (JPEG) hardly compress and fill at most the upload; the rest is left for the tables.
+    /// </summary>
+    public const long MaxTotalBytes = 2 * MaxUploadBytes;
+
+    /// <summary>Entries in one archive: a manifest, nine tables and one photo per article at most.</summary>
+    public const int MaxEntries = 100_000;
 
     public static readonly JsonSerializerOptions Json = new()
     {

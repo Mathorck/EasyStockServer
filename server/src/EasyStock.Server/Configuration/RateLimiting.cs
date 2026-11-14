@@ -10,7 +10,8 @@ namespace EasyStock.Server.Configuration;
 
 /// <summary>
 /// Rate limits (docs/03-server-spec.md, "Rate limits"): <see cref="AuthIp"/> (10 per minute per IP) on login,
-/// setup, invite redeem, Guest signup, reset and complete-promotion; every other /api call 120 per minute per
+/// setup, invite redeem, Guest signup, reset, complete-promotion and
+/// <c>POST /me/password</c>; every other /api call 120 per minute per
 /// device session, or per IP without a valid token. Rejections are 429 <c>rate-limited</c> with Retry-After.
 /// </summary>
 public static class RateLimiting

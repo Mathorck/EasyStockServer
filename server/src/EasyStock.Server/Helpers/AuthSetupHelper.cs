@@ -28,9 +28,7 @@ public static class AuthSetupHelper
                 o.Password.RequireUppercase = false;
                 o.Password.RequireNonAlphanumeric = false;
                 o.Password.RequiredUniqueChars = 1;
-                o.Lockout.MaxFailedAccessAttempts = AuthLimitsHelper.MaxFailedLogins;
-                o.Lockout.DefaultLockoutTimeSpan = AuthLimitsHelper.LockoutDuration;
-                o.Lockout.AllowedForNewUsers = true;
+                // Lockout is handled by LoginHandler itself, so Identity's o.Lockout.* options are not set.
                 o.User.RequireUniqueEmail = false;
             })
             .AddEntityFrameworkStores<EasyStockDbContext>()
@@ -56,7 +54,9 @@ public static class AuthSetupHelper
         services.AddSingleton<GuestSignupCounterHandler>();
         services.AddSingleton<QrContentHandler>();
         services.AddSingleton<AccessTokenHandler>();
+        services.AddSingleton<RefreshTokenHandler>();
         services.AddScoped<SessionHandler>();
+        services.AddScoped<PasswordAttemptHandler>();
         services.AddScoped<LoginHandler>();
         services.AddScoped<SetupHandler>();
         services.AddScoped<InviteHandler>();

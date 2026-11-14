@@ -5,6 +5,8 @@ using EasyStock.Server.Enums;
 using EasyStock.Server.Models;
 using EasyStock.Server.Helpers;
 using EasyStock.Server.Tests.Infrastructure;
+using Microsoft.EntityFrameworkCore;
+using Microsoft.Extensions.DependencyInjection;
 using Xunit;
 
 namespace EasyStock.Server.Tests;
@@ -195,4 +197,57 @@ public sealed class AdminPublicInviteTests(PostgresFixture pg)
         });
         Assert.True(await info());
     }
+
+    public static TheoryData<string> SharedTables() => new(
+        "category", "attribute_definition", "category_attribute", "article", "location", "item", "stock_movement",
+        "stock_review", "stock_review_line");
+
+    [Theory]
+    [MemberData(nameof(SharedTables))]
+    public async Task Server_info_has_data_when_only_this_shared_table_has_rows(string only)
+    {
+        // No pooling: nine extra pooled databases would use up the server's connections for the rest of the run.
+        var cs = new Npgsql.NpgsqlConnectionStringBuilder(await pg.CreateDatabaseAsync()) { Pooling = false }.ConnectionString;
+        using var factory = new ApiFactory(cs);
+        factory.CreateVersionedClient();
+        var anonymous = factory.CreateClient();
+        var (category, attribute, location, article) = (Guid.NewGuid(), Guid.NewGuid(), Guid.NewGuid(), Guid.NewGuid());
+        var (review, item) = (Guid.NewGuid(), Guid.NewGuid());
+        await factory.WithDb(async db =>
+        {
+            db.AddRange(
+                new DB.Entities.Category { Id = category, Name = "c", CreatedAt = 1, UpdatedAt = 1 },
+                new DB.Entities.AttributeDefinition { Id = attribute, Key = "k", Label = "l", DataType = "text", CreatedAt = 1, UpdatedAt = 1 },
+                new DB.Entities.CategoryAttribute { Id = Guid.NewGuid(), CategoryId = category, AttributeId = attribute, CreatedAt = 1, UpdatedAt = 1 },
+                new DB.Entities.Location { Id = location, Name = "shelf", CreatedAt = 1, UpdatedAt = 1 },
+                new DB.Entities.Article { Id = article, Name = "a", CategoryId = category, CreatedAt = 1, UpdatedAt = 1 },
+                new DB.Entities.Item { Id = item, ArticleId = article, LocationId = location, CreatedAt = 1, UpdatedAt = 1 },
+                new DB.Entities.StockMovement { Id = Guid.NewGuid(), ArticleId = article, LocationId = location, Quantity = 1000, Reason = "purchase", OccurredAt = 1, CreatedAt = 1 },
+                new DB.Entities.StockReview { Id = review, LocationId = location, StartedAt = 1, CreatedAt = 1, UpdatedAt = 1 },
+                new DB.Entities.StockReviewLine { Id = Guid.NewGuid(), ReviewId = review, ArticleId = article, LocationId = location, CreatedAt = 1, UpdatedAt = 1 });
+            await db.SaveChangesAsync(Ct);
+        });
+        Assert.True(await HasData(anonymous));
+
+        // Empty every shared table but one. Replica role: no foreign key checks, so the order does not matter.
+        string[] all = ["stock_review_line", "stock_review", "stock_movement", "item", "article", "category_attribute",
+            "attribute_definition", "category", "location"];
+        await using (var conn = new Npgsql.NpgsqlConnection(cs))
+        {
+            await conn.OpenAsync(Ct);
+            await using var cmd = conn.CreateCommand();
+            cmd.CommandText = "SET session_replication_role = replica; "
+                + string.Join(' ', all.Where(t => t != only).Select(t => $"DELETE FROM {t};"));
+            await cmd.ExecuteNonQueryAsync(Ct);
+        }
+
+        Assert.True(await HasData(anonymous), $"a row in {only} alone is data");
+
+        var deleteLast = $"DELETE FROM {only}";
+        await factory.WithDb(db => db.Database.ExecuteSqlRawAsync(deleteLast, Ct));
+        Assert.False(await HasData(anonymous));
+    }
+
+    private static async Task<bool> HasData(HttpClient client) =>
+        (await ReadJson(await client.GetAsync("/api/v1/server-info", Ct))).GetProperty("hasData").GetBoolean();
 }

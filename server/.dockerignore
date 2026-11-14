@@ -1,6 +1,22 @@
+# The build context is the server folder; only src/ and the build files are needed.
 **/bin/
 **/obj/
 **/TestResults/
+**/.vs/
+**/.idea/
+**/.vscode/
 tests/
+e2e/
+openapi/
+.git/
+.gitignore
+.gitattributes
+.github/
+.claude/
 .env
-*.md
+.env.*
+**/*.user
+**/*.md
+docker-compose*.yml
+Dockerfile
+.dockerignore

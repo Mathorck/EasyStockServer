@@ -44,14 +44,8 @@ public sealed class AdminBackupTests(PostgresFixture pg) : IAsyncLifetime
 
     private async Task<Server> FreshAsync(Role role = Role.Admin)
     {
-        var name = "bk_" + Guid.NewGuid().ToString("N");
-        await using (var admin = new NpgsqlConnection(pg.ConnectionString))
-        {
-            await admin.OpenAsync(TestContext.Current.CancellationToken);
-            await using var cmd = new NpgsqlCommand($"CREATE DATABASE {name}", admin);
-            await cmd.ExecuteNonQueryAsync(TestContext.Current.CancellationToken);
-        }
-        return await StartAsync(new NpgsqlConnectionStringBuilder(pg.ConnectionString) { Database = name, Pooling = false }.ConnectionString, role);
+        var cs = new NpgsqlConnectionStringBuilder(await pg.CreateDatabaseAsync()) { Pooling = false }.ConnectionString;
+        return await StartAsync(cs, role);
     }
 
     private async Task<Server> StartAsync(string connectionString, Role role)
@@ -97,7 +91,7 @@ public sealed class AdminBackupTests(PostgresFixture pg) : IAsyncLifetime
         ["created_by"] = createdBy, ["device_id"] = null,
     };
 
-    private static byte[] Jpeg() => [0xFF, 0xD8, 0xFF, 0xE0, .. RandomNumberGenerator.GetBytes(64)];
+    private static byte[] Jpeg() => [0xFF, 0xD8, 0xFF, 0xE0, .. RandomNumberGenerator.GetBytes(64), 0xFF, 0xD9];
 
     private static byte[] Zip(IEnumerable<(string Name, byte[] Content)> entries)
     {
@@ -516,8 +510,56 @@ public sealed class AdminBackupTests(PostgresFixture pg) : IAsyncLifetime
         await Expect(Backup(format: "other"), HttpStatusCode.UnprocessableEntity, "not-a-backup");
         await Expect(Backup(formatVersion: 2), HttpStatusCode.UnprocessableEntity, "backup-newer-version");
         await Expect(Backup(schemaVersion: 12), HttpStatusCode.UnprocessableEntity, "backup-newer-version");
+        await Expect(Backup(schemaVersion: 9), HttpStatusCode.UnprocessableEntity, "backup-invalid");
         await Expect(Backup(extra: ("tables/category.json", "{ not json"u8.ToArray())), HttpStatusCode.UnprocessableEntity, "backup-invalid");
         await Expect(Backup(extra: ("tables/category.json", "{\"a\":1}"u8.ToArray())), HttpStatusCode.UnprocessableEntity, "backup-invalid");
+    }
+
+    [Fact]
+    public async Task A_photo_too_large_for_the_image_store_refuses_the_backup()
+    {
+        var s = await SharedAsync();
+        var art = NewId();
+        var path = $"images/{NewId()}.jpg";
+        var photo = new byte[ImageHandlerMaxBytes + 1];
+        photo[0] = 0xFF; photo[1] = 0xD8; photo[2] = 0xFF;
+        var r = await Post(s, Backup(Tables(article: [Art(art, "Big photo " + art, image: path)]),
+            new Dictionary<string, byte[]> { [path] = photo }));
+        Assert.Equal(HttpStatusCode.RequestEntityTooLarge, r.StatusCode);
+        Assert.Equal("backup-too-large", await ProblemType(r));
+        Assert.False(await WithDb(s, db => db.Articles.AnyAsync(a => a.Id == Guid.Parse(art), TestContext.Current.CancellationToken)));
+    }
+
+    private const int ImageHandlerMaxBytes = (int)Handlers.Images.ImageHandler.MaxBytes;
+
+    [Fact]
+    public async Task A_movement_without_its_quantity_is_refused()
+    {
+        var s = await SharedAsync();
+        var loc = NewId();
+        var art = NewId();
+        var mov = Mov(NewId(), art, loc, 5);
+        mov.Remove("quantity");
+        var r = await Post(s, Backup(Tables(location: [Loc(loc, "Q " + loc)], article: [Art(art, "Q " + art)], movement: [mov])));
+        Assert.Equal(HttpStatusCode.UnprocessableEntity, r.StatusCode);
+        Assert.Equal("backup-invalid", await ProblemType(r));
+        Assert.False(await WithDb(s, db => db.Articles.AnyAsync(a => a.Id == Guid.Parse(art), TestContext.Current.CancellationToken)));
+    }
+
+    [Fact]
+    public async Task An_escaped_backslash_before_u0000_in_attributes_is_imported()
+    {
+        var s = await SharedAsync();
+        var art = NewId();
+        var row = Art(art, "Escaped " + art);
+        row["attributes"] = new Dictionary<string, string> { ["note"] = "C:\\u0000" };
+        var r = await Post(s, Backup(Tables(article: [row])));
+        Assert.Equal(HttpStatusCode.OK, r.StatusCode);
+
+        var nul = Art(NewId(), "Nul " + art);
+        nul["attributes"] = new Dictionary<string, string> { ["note"] = "a\0b" };
+        var refused = await Post(s, Backup(Tables(article: [nul])));
+        Assert.Equal(HttpStatusCode.UnprocessableEntity, refused.StatusCode);
     }
 
     [Fact]

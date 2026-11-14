@@ -17,6 +17,19 @@ internal sealed class SyncBatchConfiguration : IEntityTypeConfiguration<SyncBatc
         e.HasIndex(x => x.UserId);
         e.HasIndex(x => x.DeviceSessionId);
         e.HasIndex(x => x.ReceivedAt);
+        e.Property(x => x.RequestHash).HasMaxLength(32);
+    }
+}
+
+internal sealed class AttributeAliasConfiguration : IEntityTypeConfiguration<AttributeAlias>
+{
+    public void Configure(EntityTypeBuilder<AttributeAlias> e)
+    {
+        e.ToTable("attribute_alias");
+        e.HasKey(x => x.AliasId);
+        e.Property(x => x.AliasId).ValueGeneratedNever();
+        e.Ref<AttributeAlias, AttributeDefinition>(nameof(AttributeAlias.AttributeId), required: true);
+        e.HasIndex(x => x.AttributeId);
     }
 }
 

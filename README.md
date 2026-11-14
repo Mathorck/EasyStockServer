@@ -14,11 +14,11 @@
 
 ---
 
-## ⚠️ Not released yet
+## Status
 
 - **The server is feature-complete for the app's server mode**: login, roles, sync, photos, backups, alerts and admin. It is tested against a real PostgreSQL, and end-to-end against the app's own sync code.
-- **No release and no published Docker image yet.** Once a tag is pushed, the image and binaries are published (see [Releases](#releases)). Until then, build the image yourself (see [Quick start](#quick-start)).
-- Do not host important data on it yet. The data format and API may still change before the first release.
+- **Released as `0.1.0`.** Binaries and the Docker image are published for each tag (see [Releases](#releases)).
+- This is an early release: the data format and API may still change, so do not host important data on it yet.
 
 ---
 
@@ -60,7 +60,7 @@ The image is published on GitHub Container Registry for `linux/amd64` and `linux
 docker pull ghcr.io/mathorck/easystock-server:latest
 ```
 
-The Compose file is in [`server/docker-compose.yml`](server/docker-compose.yml). Until the first release exists, build the image yourself with `docker compose up -d --build` in `server/`.
+The Compose file is in [`server/docker-compose.yml`](server/docker-compose.yml). To build the image yourself instead, run `docker compose up -d --build` in `server/`.
 
 ```yaml
 services:
@@ -110,7 +110,9 @@ All settings come from environment variables, with safe defaults. Everything els
 | `EASYSTOCK_DATA_DIR` | no | `/data` | Folder for photos, the signing key and data-protection keys |
 | `EASYSTOCK_CERT_FINGERPRINT` | no | | SHA-256 of a self-signed certificate, written into QR codes |
 | `EASYSTOCK_LOG_LEVEL` | no | from `appsettings.json` (`Information`) | Log level: `Verbose`/`Trace`, `Debug`, `Information`, `Warning`, `Error`, `Fatal`/`Critical`. Overrides `appsettings.json` |
-| `EASYSTOCK_TRUSTED_PROXIES` | no | empty | Comma-separated IPs or CIDR ranges of your reverse proxy |
+| `EASYSTOCK_TRUSTED_PROXIES` | no | empty | Comma-separated IPs or CIDR ranges of your reverse proxy. Ranges broader than /8 (IPv4) or /32 (IPv6), such as `0.0.0.0/0`, are refused at startup |
+| `EASYSTOCK_IMAGE_QUOTA_MB` | no | `2048` | Total size of stored photos. An upload past it gets `413 image-quota-exceeded` |
+| `EASYSTOCK_CLEANUP_INTERVAL_MINUTES` | no | `60` | Minutes between background cleanups of expired invites, resets, promotions and sessions |
 
 The server refuses to start if a required variable is missing or invalid.
 
@@ -205,7 +207,7 @@ No secret is needed to publish: the image uses the workflow's `GITHUB_TOKEN`. Th
 
 ### Running a binary
 
-Unpack the archive, set the variables from [Configuration](#configuration) and start it. Outside Docker, set `EASYSTOCK_DATA_DIR` to a writable folder, because the default is `/data`. The server needs a PostgreSQL 16+ database and listens on port 8080 by default (`ASPNETCORE_URLS` changes it). Keep `appsettings.json` next to the binary.
+Unpack the archive, set the variables from [Configuration](#configuration) and start it. Outside Docker, set `EASYSTOCK_DATA_DIR` to a writable folder, because the default is `/data`. The server needs a PostgreSQL 16+ database and listens on port 5000 by default (`http://localhost:5000`; `ASPNETCORE_URLS` changes it). The Docker image sets port 8080 instead. Keep `appsettings.json` next to the binary.
 
 ```
 export EASYSTOCK_DB="Host=localhost;Database=easystock;Username=easystock;Password=secret"

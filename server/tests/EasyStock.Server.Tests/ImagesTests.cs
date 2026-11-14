@@ -1,7 +1,11 @@
 using System.Net;
 using System.Net.Http.Headers;
 using System.Security.Cryptography;
+using EasyStock.Server.DB;
 using EasyStock.Server.Enums;
+using EasyStock.Server.Handlers.Images;
+using Microsoft.EntityFrameworkCore;
+using Microsoft.Extensions.DependencyInjection;
 using EasyStock.Server.Tests.Infrastructure;
 using Xunit;
 
@@ -18,7 +22,8 @@ public sealed class ImagesTests(PostgresFixture pg) : IDisposable
     private static byte[] Jpeg(int size = 1000)
     {
         var bytes = RandomNumberGenerator.GetBytes(size);
-        bytes[0] = 0xFF; bytes[1] = 0xD8; bytes[2] = 0xFF;
+        bytes[0] = 0xFF; bytes[1] = 0xD8; bytes[2] = 0xFF; bytes[3] = 0xE0;
+        bytes[^2] = 0xFF; bytes[^1] = 0xD9;
         return bytes;
     }
 
@@ -131,6 +136,63 @@ public sealed class ImagesTests(PostgresFixture pg) : IDisposable
         var r = await (await ClientFor(Role.Member)).PutAsync($"/api/v1/images/{Sha(bytes)}", Body(bytes), TestContext.Current.CancellationToken);
         Assert.Equal(HttpStatusCode.BadRequest, r.StatusCode);
         Assert.Contains("not-a-jpeg", await r.Content.ReadAsStringAsync(TestContext.Current.CancellationToken));
+    }
+
+    [Fact]
+    public async Task Put_truncated_jpeg_without_end_marker_is_400()
+    {
+        var bytes = Jpeg();
+        bytes[^1] = 0x00;
+        var r = await (await ClientFor(Role.Member)).PutAsync($"/api/v1/images/{Sha(bytes)}", Body(bytes), TestContext.Current.CancellationToken);
+        Assert.Equal(HttpStatusCode.BadRequest, r.StatusCode);
+        Assert.Contains("not-a-jpeg", await r.Content.ReadAsStringAsync(TestContext.Current.CancellationToken));
+    }
+
+    [Theory]
+    [InlineData(0x00)]
+    [InlineData(0xFF)]
+    public async Task Put_jpeg_with_invalid_first_marker_is_400(byte marker)
+    {
+        var bytes = Jpeg();
+        bytes[3] = marker;
+        var r = await (await ClientFor(Role.Member)).PutAsync($"/api/v1/images/{Sha(bytes)}", Body(bytes), TestContext.Current.CancellationToken);
+        Assert.Equal(HttpStatusCode.BadRequest, r.StatusCode);
+    }
+
+    [Fact]
+    public async Task Put_over_the_storage_quota_is_413_but_a_stored_photo_can_be_put_again()
+    {
+        var ct = TestContext.Current.CancellationToken;
+        using var factory = new ApiFactory(await pg.CreateDatabaseAsync(), settings: new Dictionary<string, string> { ["EASYSTOCK_IMAGE_QUOTA_MB"] = "1" });
+        var c = factory.ClientFor(await factory.SignInAsync(Role.Member));
+        var first = Jpeg(700 * 1024);
+        var second = Jpeg(700 * 1024);
+
+        Assert.Equal(HttpStatusCode.Created, (await c.PutAsync($"/api/v1/images/{Sha(first)}", Body(first), ct)).StatusCode);
+        var r = await c.PutAsync($"/api/v1/images/{Sha(second)}", Body(second), ct);
+        Assert.Equal(HttpStatusCode.RequestEntityTooLarge, r.StatusCode);
+        Assert.Contains("image-quota-exceeded", await r.Content.ReadAsStringAsync(ct));
+        Assert.Equal(HttpStatusCode.NotFound, (await Head(c, Sha(second))).StatusCode);
+        Assert.Equal(HttpStatusCode.OK, (await c.PutAsync($"/api/v1/images/{Sha(first)}", Body(first), ct)).StatusCode);
+    }
+
+    [Fact]
+    public async Task DeleteOrphans_removes_unreferenced_old_photos_only()
+    {
+        var ct = TestContext.Current.CancellationToken;
+        using var factory = new ApiFactory(await pg.CreateDatabaseAsync()); // own database: orphans are counted globally
+        var c = factory.ClientFor(await factory.SignInAsync(Role.Member));
+        var bytes = Jpeg(); var sha = Sha(bytes);
+        Assert.Equal(HttpStatusCode.Created, (await c.PutAsync($"/api/v1/images/{sha}", Body(bytes), ct)).StatusCode);
+
+        await using var scope = factory.Services.CreateAsyncScope();
+        var db = scope.ServiceProvider.GetRequiredService<EasyStockDbContext>();
+        var handler = factory.Services.GetRequiredService<ImageHandler>();
+        Assert.Equal(0, await handler.DeleteOrphansAsync(db, TimeSpan.FromHours(1), factory.Time, ct)); // too recent
+        factory.Time.Advance(TimeSpan.FromHours(2));
+        Assert.Equal(1, await handler.DeleteOrphansAsync(db, TimeSpan.FromHours(1), factory.Time, ct));
+        Assert.False(handler.Exists(sha));
+        Assert.False(await db.Set<EasyStock.Server.DB.Entities.ImageRecord>().AnyAsync(i => i.Sha256 == sha, ct));
     }
 
     [Fact]

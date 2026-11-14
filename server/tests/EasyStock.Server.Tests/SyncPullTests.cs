@@ -21,8 +21,8 @@ using Xunit;
 namespace EasyStock.Server.Tests;
 
 /// <summary>
-/// GET /api/v1/sync/pull. The database is shared with tests running in parallel, so every test reads the cursor
-/// just before inserting its own rows, and only asserts on its own ids.
+/// GET /api/v1/sync/pull. Each test (class instance) has a database of its own, so no other test moves the cursor;
+/// tests still read the cursor just before inserting their own rows, and only assert on their own ids.
 /// </summary>
 public sealed class SyncPullTests(PostgresFixture pg) : IAsyncLifetime
 {
@@ -359,7 +359,7 @@ public sealed class SyncPullTests(PostgresFixture pg) : IAsyncLifetime
             PendingItem = """{"serial_number":"SN-1","status":"available"}""", CreatedAt = 1, UpdatedAt = 1,
         };
         var movements = new[] { Movement(f, 5000), Movement(f, -1500), Movement(f, -250) };
-        var alert = new LowStockAlert { Id = Guid.NewGuid(), ArticleId = f.Article.Id, CrossedAt = 1762859000000, Stock = 3250, CausedByUserId = Guid.NewGuid() };
+        var alert = new LowStockAlert { Id = Guid.NewGuid(), ArticleId = f.Article.Id, CrossedAt = 1762859000000, Stock = 3250, CausedByUserId = null };
         var ids = new HashSet<string> { review.Id.ToString(), line.Id.ToString(), alert.Id.ToString() };
         ids.UnionWith(movements.Select(m => m.Id.ToString()));
 
@@ -432,8 +432,8 @@ public sealed class SyncPullTests(PostgresFixture pg) : IAsyncLifetime
         using var doc = await Pull(await ClientAs(Role.Member), since);
         var row = AllRows(doc).Single(r => r.Row.GetProperty("id").GetString() == movement.Id.ToString());
         Assert.True(row.Row.GetProperty("serverSeq").GetInt64() > before);
-        Assert.True(row.Row.GetProperty("createdBy").ValueKind is JsonValueKind.Null || !row.Row.TryGetProperty("createdBy", out _));
-        Assert.True(row.Row.GetProperty("deviceId").ValueKind is JsonValueKind.Null || !row.Row.TryGetProperty("deviceId", out _));
+        Assert.True(!row.Row.TryGetProperty("createdBy", out var createdBy) || createdBy.ValueKind is JsonValueKind.Null);
+        Assert.True(!row.Row.TryGetProperty("deviceId", out var deviceId) || deviceId.ValueKind is JsonValueKind.Null);
         Assert.Equal(1000, row.Row.GetProperty("quantity").GetInt64());
     }
 
@@ -456,7 +456,9 @@ public sealed class SyncPullTests(PostgresFixture pg) : IAsyncLifetime
                 using var doc = await Pull(client, cursor, 2000);
                 foreach (var a in doc.RootElement.GetProperty("alerts").EnumerateArray())
                     if (a.GetProperty("id").GetString() == alert.Id.ToString()) return a.Clone();
-                cursor = doc.RootElement.GetProperty("next").GetInt64();
+                var next = doc.RootElement.GetProperty("next").GetInt64();
+                Assert.True(next > cursor, "the cursor advances");
+                cursor = next;
             }
             return null;
         }
@@ -611,8 +613,10 @@ public sealed class SyncPullTests(PostgresFixture pg) : IAsyncLifetime
             using var doc = await Pull(client, cursor, 2000);
             foreach (var u in doc.RootElement.GetProperty("users").EnumerateArray())
                 users[u.GetProperty("id").GetString()!] = u.GetProperty("displayName").GetString()!;
-            cursor = doc.RootElement.GetProperty("next").GetInt64();
+            var next = doc.RootElement.GetProperty("next").GetInt64();
             if (!doc.RootElement.GetProperty("hasMore").GetBoolean()) break;
+            Assert.True(next > cursor, "the cursor advances while there is more");
+            cursor = next;
         }
         Assert.Equal("Test user", users[kept.UserId.ToString()]);
         Assert.Equal("Deleted user", users[deleted.UserId.ToString()]);

@@ -1,10 +1,13 @@
 using System.Net;
+using System.Text.Json;
 using EasyStock.Server.Configuration;
+using EasyStock.Server.DB.Entities;
 using EasyStock.Server.Enums;
 using EasyStock.Server.Helpers;
 using EasyStock.Server.Models;
 using EasyStock.Server.Handlers.Auth;
 using EasyStock.Server.Tests.Infrastructure;
+using Npgsql;
 using Xunit;
 
 namespace EasyStock.Server.Tests;
@@ -14,9 +17,9 @@ public sealed class PromotionTests(PostgresFixture pg)
 {
     private static CancellationToken Ct => TestContext.Current.CancellationToken;
 
-    private async Task<(ApiFactory Factory, TokenAnswer Guest)> NewGuest()
+    private async Task<(ApiFactory Factory, TokenAnswer Guest)> NewGuest(string? connectionString = null)
     {
-        var factory = new ApiFactory(await pg.CreateDatabaseAsync());
+        var factory = new ApiFactory(connectionString ?? await pg.CreateDatabaseAsync());
         var token = await factory.EnableGuestSignupAsync();
         var guest = await (await factory.GuestSignupAsync(token)).Read<TokenAnswer>();
         return (factory, guest);
@@ -114,4 +117,111 @@ public sealed class PromotionTests(PostgresFixture pg)
             (await Assert.ThrowsAsync<ProblemException>(() =>
                 factory.WithService<QrGrant, PasswordResetHandler>(s => s.CreateAsync(guest.User.Id, null, Ct)))).Type);
     }
+
+    [Fact]
+    public async Task A_promotion_cancelled_while_completing_is_not_completed()
+    {
+        var connectionString = await pg.CreateDatabaseAsync();
+        var (factory, guest) = await NewGuest(connectionString);
+        using var _ = factory;
+        await Promote(factory, guest.User.Id, Role.Member, guest.User.ShortCode);
+
+        // An Admin's cancel, not committed yet, when the Guest completes.
+        await using var conn = new NpgsqlConnection(connectionString);
+        await conn.OpenAsync(Ct);
+        await using var cancel = await conn.BeginTransactionAsync(Ct);
+        await using (var update = new NpgsqlCommand(
+            "UPDATE promotion SET ended_at = now(), end_reason = 'cancelled' WHERE user_id = @id AND ended_at IS NULL", conn, cancel))
+        {
+            update.Parameters.AddWithValue("id", guest.User.Id);
+            Assert.Equal(1, await update.ExecuteNonQueryAsync(Ct));
+        }
+
+        var completing = Complete(factory, guest.AccessToken, "racer");
+        await WaitForLockWaitAsync(connectionString, completing);
+        await cancel.CommitAsync(Ct);
+
+        await (await completing).Problem(HttpStatusCode.NotFound, "no-promotion");
+        var me = await (await factory.GetMeAsync(guest.AccessToken)).Read<MeAnswer>();
+        Assert.Equal("guest", me.Kind);
+    }
+
+    /// <summary>
+    /// Until a session of the database waits on a lock (the completing request). Polled from a connection of its own,
+    /// outside any transaction: pg_stat_activity is a snapshot taken once per transaction.
+    /// </summary>
+    private static async Task WaitForLockWaitAsync(string connectionString, Task request)
+    {
+        await using var conn = new NpgsqlConnection(connectionString);
+        await conn.OpenAsync(Ct);
+        for (var i = 0; i < 400 && !request.IsCompleted; i++)
+        {
+            await using var cmd = new NpgsqlCommand(
+                "SELECT count(*) FROM pg_stat_activity WHERE datname = current_database() AND pid <> pg_backend_pid() AND wait_event_type = 'Lock'",
+                conn);
+            if ((long)(await cmd.ExecuteScalarAsync(Ct))! > 0) return;
+            await Task.Delay(25, Ct);
+        }
+        Assert.Fail("the completing request never waited on the cancel's lock");
+    }
+
+    [Fact]
+    public async Task Promoted_guest_pulls_everything_again_without_a_new_dataset_epoch()
+    {
+        var (factory, guest) = await NewGuest();
+        using var _ = factory;
+        await Promote(factory, guest.User.Id, Role.Member, guest.User.ShortCode);
+        var location = new Location { Id = Guid.NewGuid(), Name = "loc", CreatedAt = 1, UpdatedAt = 1 };
+        var review = new StockReview { Id = Guid.NewGuid(), LocationId = location.Id, StartedAt = 1, CreatedAt = 1, UpdatedAt = 1 };
+        await factory.WithDb(async db =>
+        {
+            db.AddRange(location, review);
+            await db.SaveChangesAsync(Ct);
+        });
+        var epoch = await ServerEpoch(factory);
+        var member = await factory.CreateUserAsync(Role.Member);
+        var memberClient = factory.CreateVersionedClient(member.AccessToken);
+
+        // As a Guest: no review, and a cursor past it.
+        var guestPage = await PullPage(factory.CreateVersionedClient(guest.AccessToken), 0, null);
+        Assert.False(HasReview(guestPage, review.Id));
+        var guestCursor = guestPage.GetProperty("next").GetInt64();
+        Assert.True(guestCursor > 0);
+        var memberCursor = (await PullPage(memberClient, 0, null)).GetProperty("next").GetInt64();
+
+        var promoted = await (await Complete(factory, guest.AccessToken, "promoted")).Read<TokenAnswer>();
+        var client = factory.CreateVersionedClient(promoted.AccessToken);
+
+        // The incremental pull is refused like after a restore, with the same epoch: the phone pulls from 0.
+        var problem = await (await Pull(client, guestCursor, epoch)).Problem(HttpStatusCode.Conflict, "dataset-reset");
+        Assert.Equal(epoch, problem.GetProperty("datasetEpoch").GetString());
+        Assert.Equal(epoch, await ServerEpoch(factory));
+
+        var full = await PullPage(client, 0, null);
+        Assert.True(HasReview(full, review.Id));
+        Assert.Equal(epoch, full.GetProperty("datasetEpoch").GetString());
+        // Done once: the next incremental pulls are plain.
+        await PullPage(client, guestCursor, epoch);
+
+        // Nobody else is affected.
+        await PullPage(memberClient, memberCursor, epoch);
+    }
+
+    private static Task<HttpResponseMessage> Pull(HttpClient client, long since, string? epoch)
+    {
+        var request = new HttpRequestMessage(HttpMethod.Get, $"/api/v1/sync/pull?since={since}");
+        if (epoch is not null) request.Headers.Add("X-EasyStock-Dataset-Epoch", epoch);
+        return client.SendAsync(request, Ct);
+    }
+
+    private static async Task<JsonElement> PullPage(HttpClient client, long since, string? epoch) =>
+        await (await Pull(client, since, epoch)).Read<JsonElement>();
+
+    private static bool HasReview(JsonElement page, Guid id) =>
+        page.GetProperty("rows").TryGetProperty("stock_review", out var reviews)
+        && reviews.EnumerateArray().Any(r => r.GetProperty("id").GetString() == id.ToString());
+
+    private static async Task<string> ServerEpoch(ApiFactory factory) =>
+        (await (await factory.CreateVersionedClient().GetAsync("/api/v1/server-info", Ct)).Read<JsonElement>())
+            .GetProperty("datasetEpoch").GetString()!;
 }

@@ -1,3 +1,5 @@
+using System.Text;
+using System.Text.Json;
 using EasyStock.Server.Interfaces;
 using EasyStock.Server.Models;
 using EasyStock.Server.Handlers.Backup;
@@ -150,7 +152,30 @@ public static class BackupValidatorHelper
     {
         if (raw is null) return;
         if (raw.Length == 0 || raw[0] != first) Damaged("Invalid JSON column");
-        if (raw.Contains("\\u0000", StringComparison.Ordinal)) Damaged("Invalid character");
+        if (HasNulCharacter(raw)) Damaged("Invalid character");
+    }
+
+    /// <summary>
+    /// True when a string or a key of the JSON decodes to a NUL character (jsonb refuses <c>\u0000</c>). The text is
+    /// decoded, so an escaped backslash followed by "u0000" is not a NUL. Raw JSON text cannot hold a literal NUL.
+    /// </summary>
+    private static bool HasNulCharacter(string raw)
+    {
+        if (!raw.Contains("\\u", StringComparison.Ordinal)) return false; // a NUL can only be written as \u0000
+        try
+        {
+            var reader = new Utf8JsonReader(Encoding.UTF8.GetBytes(raw));
+            while (reader.Read())
+                if (reader is { TokenType: JsonTokenType.String or JsonTokenType.PropertyName, ValueIsEscaped: true }
+                    && reader.GetString()!.Contains('\0'))
+                    return true;
+            return false;
+        }
+        catch (Exception e) when (e is JsonException or InvalidOperationException)
+        {
+            Damaged("Invalid JSON column"); // lone surrogate escapes, which jsonb refuses as well
+            return true;
+        }
     }
 
     private static void Damaged(string what) => throw new BackupException(BackupError.Damaged, what);

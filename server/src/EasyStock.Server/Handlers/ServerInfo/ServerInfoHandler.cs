@@ -1,6 +1,7 @@
 using EasyStock.Server.Helpers;
 using EasyStock.Server.DB;
 using EasyStock.Server.Handlers.Auth;
+using EasyStock.Server.Handlers.Settings;
 using EasyStock.Server.Handlers.Sync;
 using EasyStock.Server.Models;
 using Microsoft.EntityFrameworkCore;
@@ -11,10 +12,10 @@ namespace EasyStock.Server.Handlers.ServerInfo;
 /// The public <c>GET /server-info</c> answer: setup state, whether the server holds data, whether Guest signup works,
 /// and the dataset epoch.
 /// </summary>
-public sealed class ServerInfoHandler(EasyStockDbContext db, SetupHandler setup, DatasetEpochHandler datasetEpoch)
+public sealed class ServerInfoHandler(EasyStockDbContext db, SetupHandler setup, DatasetEpochHandler datasetEpoch, SettingsHandler settings)
 {
     public async Task<Models.ServerInfo> GetAsync(CancellationToken ct) => new(
-        ServerName: "EasyStock",
+        ServerName: (await settings.GetAsync(ct)).ServerName,
         ServerVersion: CompatHelper.ServerVersion,
         ApiVersion: CompatHelper.ApiVersion,
         MinAppVersion: CompatHelper.MinAppVersion,
