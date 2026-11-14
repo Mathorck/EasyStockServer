@@ -88,6 +88,8 @@ public sealed class AdminBackupController(
     {
         BackupError.TooLarge => ProblemTypesHelper.Problem(StatusCodes.Status413PayloadTooLarge, ProblemTypesHelper.BackupTooLarge,
             detail: "The backup is too large."),
+        BackupError.ImageQuotaExceeded => ProblemTypesHelper.Problem(StatusCodes.Status413PayloadTooLarge, ProblemTypesHelper.ImageQuotaExceeded,
+            detail: "The backup's photos do not fit in the server's image quota. Nothing was imported."),
         BackupError.Encrypted => ProblemTypesHelper.Problem(StatusCodes.Status422UnprocessableEntity, ProblemTypesHelper.BackupEncrypted,
             detail: "Encrypted backups cannot be imported by the server. Export an unencrypted backup from the app."),
         BackupError.NewerVersion => ProblemTypesHelper.Problem(StatusCodes.Status422UnprocessableEntity, ProblemTypesHelper.BackupNewerVersion,

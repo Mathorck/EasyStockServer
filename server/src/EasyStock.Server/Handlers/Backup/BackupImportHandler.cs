@@ -10,8 +10,9 @@ namespace EasyStock.Server.Handlers.Backup;
 /// <summary>
 /// Imports a backup archive. Merge: the app's merge rules (see <see cref="BackupMergeHelper"/>) applied to the server data.
 /// Replace: the shared data is wiped and replaced by the backup. Both run in one transaction under the sync lock, so
-/// no sync push or pull sees a half-imported state, and either everything is imported or nothing is. Photos are stored
-/// (by SHA-256, so harmlessly repeatable) before the transaction starts.
+/// no sync push or pull sees a half-imported state, and either everything is imported or nothing is. Photos are checked
+/// into temp files before the transaction, then stored inside it under the image quota (their rows roll back with it,
+/// and their files are removed again). low_stock_state is rebuilt before the commit.
 /// </summary>
 public sealed class BackupImportHandler(
     EasyStockDbContext db,
@@ -34,19 +35,22 @@ public sealed class BackupImportHandler(
         var pathToSha = new Dictionary<string, string>(StringComparer.Ordinal);
         foreach (var path in incoming.ImagePaths())
             if (await archive.HashPhotoAsync(path, ct) is { } sha) pathToSha[path] = sha;
-        var stored = 0;
-        foreach (var (path, sha) in pathToSha)
-        {
-            if (await images.ExistsAsync(sha, ct)) continue;
-            await using var photo = await archive.OpenPhotoAsync(path, ct);
-            if (photo is null) continue;
-            if (!await images.WriteAsync(sha, photo, ct)) throw new BackupException(BackupError.Damaged, "A photo could not be stored");
-            stored++;
-        }
-
+        // Staged (checked, in temp files) before the transaction; stored inside it, under the image quota.
+        var staged = new List<StagedImage>();
         try
         {
-            var result = await ApplyAsync(incoming, pathToSha, mode, stored, ct);
+            foreach (var sha in pathToSha.Values.Distinct(StringComparer.Ordinal).ToList())
+            {
+                if (await images.ExistsAsync(sha, ct)) continue;
+                var path = pathToSha.First(p => p.Value == sha).Key;
+                await using var photo = await archive.OpenPhotoAsync(path, ct);
+                if (photo is null) continue;
+                var s = await images.StageAsync(sha, photo, ct);
+                staged.Add(s);
+                if (s.Status != ImageSaveStatus.Saved) throw new BackupException(BackupError.Damaged, "A photo could not be stored");
+            }
+
+            var (result, stored) = await ApplyAsync(incoming, pathToSha, mode, staged, ct);
             BackupLogHelper.Imported(logger, userId, ModeName(mode), result.Added.Values.Sum(), result.Updated.Values.Sum(), stored, result.Conflicts.Count);
             return result;
         }
@@ -55,13 +59,44 @@ public sealed class BackupImportHandler(
             BackupLogHelper.DatabaseRejected(logger, userId, (e.InnerException as Npgsql.PostgresException)?.SqlState);
             throw new BackupException(BackupError.Rejected, "The database rejected the backup");
         }
+        finally
+        {
+            foreach (var s in staged) s.Dispose();
+        }
     }
 
-    private async Task<BackupImportResult> ApplyAsync(
-        BackupData incoming, Dictionary<string, string> pathToSha, BackupImportMode mode, int stored, CancellationToken ct)
+    private async Task<(BackupImportResult Result, int Stored)> ApplyAsync(
+        BackupData incoming, Dictionary<string, string> pathToSha, BackupImportMode mode, IReadOnlyCollection<StagedImage> staged, CancellationToken ct)
     {
         await using var tx = await db.Database.BeginTransactionAsync(ct);
         await db.AcquireSyncLockAsync(ct);
+        // The image rows go in this transaction; the files moved in are removed again if it does not commit.
+        var photos = await images.StoreAsync(staged, ct);
+        var committed = false;
+        try
+        {
+            var result = await ApplyDataAsync(incoming, pathToSha, mode, photos.Inserted, ct);
+            await tx.CommitAsync(ct);
+            committed = true;
+            try
+            {
+                await hooks.AfterCommitAsync(mode, ct);
+            }
+            catch (Exception e) when (e is not OperationCanceledException)
+            {
+                BackupLogHelper.AfterCommitFailed(logger, e.GetType().Name); // the import itself is done
+            }
+            return (result, photos.Inserted);
+        }
+        finally
+        {
+            if (!committed) images.DeleteFiles(photos.Moved);
+        }
+    }
+
+    private async Task<BackupImportResult> ApplyDataAsync(
+        BackupData incoming, Dictionary<string, string> pathToSha, BackupImportMode mode, int stored, CancellationToken ct)
+    {
 
         var local = mode == BackupImportMode.Merge ? await ReadLocalAsync(ct) : new BackupData();
         // Rewrite the photo paths of the incoming articles to the canonical path of their hash; no photo, no path.
@@ -97,16 +132,9 @@ public sealed class BackupImportHandler(
                 plan.Conflicts.Select(c => new BackupConflictInfo(c.Type.Code(), c.Table.Name(), c.RowId, c.Value, c.Resolved)).ToList());
         }
 
+        // Stock changed outside sync push: the low-stock state must match it, or the next push alerts wrongly.
+        await LowStockStateHelper.RebuildAsync(db, ct);
         await hooks.BeforeCommitAsync(mode, db, ct);
-        await tx.CommitAsync(ct);
-        try
-        {
-            await hooks.AfterCommitAsync(mode, ct);
-        }
-        catch (Exception e) when (e is not OperationCanceledException)
-        {
-            BackupLogHelper.AfterCommitFailed(logger, e.GetType().Name); // the import itself is done
-        }
         return result;
     }
 

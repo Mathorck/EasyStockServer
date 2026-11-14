@@ -14,4 +14,6 @@ public enum BackupError
     Damaged,
     TooLarge,
     Rejected,
+    /// <summary>The backup's new photos do not fit in <c>EASYSTOCK_IMAGE_QUOTA_MB</c>.</summary>
+    ImageQuotaExceeded,
 }

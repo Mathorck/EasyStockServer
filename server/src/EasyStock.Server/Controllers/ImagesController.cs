@@ -70,33 +70,45 @@ public sealed class ImagesController(EasyStockDbContext db, ImageHandler store, 
         if (Request.ContentLength > ImageHandler.MaxBytes)
             return ProblemTypesHelper.Problem(StatusCodes.Status413PayloadTooLarge, ProblemTypesHelper.ImageTooLarge);
 
-        // A photo already stored costs nothing more; a new one must fit under the storage cap.
-        long? remaining = null;
+        // A photo already stored costs nothing more; a new one must fit under the storage cap. This first check only
+        // stops a hopeless upload early: the real one runs under the image lock, after the body is read.
+        long? hint = null;
         if (!await db.Set<ImageRecord>().AnyAsync(i => i.Sha256 == sha256, ct))
-            remaining = options.Value.ImageQuotaBytes - await ImageHandler.UsedBytesAsync(db, ct);
+            hint = options.Value.ImageQuotaBytes - await ImageHandler.UsedBytesAsync(db, ct);
 
-        ImageSaveResult result;
-        try { result = await store.SaveAsync(sha256, Request.Body, remaining, ct); }
+        StagedImage staged;
+        try { staged = await store.StageAsync(sha256, Request.Body, hint, ct); }
         catch (BadHttpRequestException e) when (e.StatusCode == StatusCodes.Status413PayloadTooLarge)
         {
             return ProblemTypesHelper.Problem(StatusCodes.Status413PayloadTooLarge, ProblemTypesHelper.ImageTooLarge);
         }
 
-        switch (result.Status)
+        using (staged)
         {
-            case ImageSaveStatus.TooLarge:
-                return ProblemTypesHelper.Problem(StatusCodes.Status413PayloadTooLarge, ProblemTypesHelper.ImageTooLarge);
-            case ImageSaveStatus.QuotaExceeded:
-                return ProblemTypesHelper.Problem(StatusCodes.Status413PayloadTooLarge, ProblemTypesHelper.ImageQuotaExceeded);
-            case ImageSaveStatus.NotJpeg:
-                return ProblemTypesHelper.Problem(StatusCodes.Status400BadRequest, ProblemTypesHelper.NotJpeg);
-            case ImageSaveStatus.HashMismatch:
-                return ProblemTypesHelper.Problem(StatusCodes.Status400BadRequest, ProblemTypesHelper.HashMismatch);
-        }
+            switch (staged.Status)
+            {
+                case ImageSaveStatus.TooLarge:
+                    return ProblemTypesHelper.Problem(StatusCodes.Status413PayloadTooLarge, ProblemTypesHelper.ImageTooLarge);
+                case ImageSaveStatus.QuotaExceeded:
+                    return ProblemTypesHelper.Problem(StatusCodes.Status413PayloadTooLarge, ProblemTypesHelper.ImageQuotaExceeded);
+                case ImageSaveStatus.NotJpeg:
+                    return ProblemTypesHelper.Problem(StatusCodes.Status400BadRequest, ProblemTypesHelper.NotJpeg);
+                case ImageSaveStatus.HashMismatch:
+                    return ProblemTypesHelper.Problem(StatusCodes.Status400BadRequest, ProblemTypesHelper.HashMismatch);
+            }
 
-        var inserted = await db.Database.ExecuteSqlInterpolatedAsync(
-            $"INSERT INTO image (sha256, size, created_at) VALUES ({sha256}, {result.Size}, {time.GetUtcNow().ToUnixTimeMilliseconds()}) ON CONFLICT (sha256) DO NOTHING", ct);
-        return inserted > 0 ? StatusCode(StatusCodes.Status201Created) : Ok();
+            // Quota check, file move and row insert under one lock: concurrent uploads cannot both fit in the last
+            // free bytes, and the orphan purge cannot delete the row between the check and the move.
+            await using var tx = await db.Database.BeginTransactionAsync(ct);
+            await ImageHandler.LockAsync(db, ct);
+            var (status, inserted) = await ImageHandler.ReserveAsync(db, sha256, staged.Size, options.Value.ImageQuotaBytes, time, ct);
+            if (status == ImageSaveStatus.QuotaExceeded)
+                return ProblemTypesHelper.Problem(StatusCodes.Status413PayloadTooLarge, ProblemTypesHelper.ImageQuotaExceeded);
+            // Already stored: the file is moved in again only if it went missing.
+            if (inserted || !store.Exists(sha256)) store.Promote(staged);
+            await tx.CommitAsync(ct);
+            return inserted ? StatusCode(StatusCodes.Status201Created) : Ok();
+        }
     }
 
     private const string CacheControl = "private, max-age=31536000, immutable";

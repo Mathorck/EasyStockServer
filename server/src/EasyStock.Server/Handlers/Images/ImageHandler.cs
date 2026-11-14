@@ -2,6 +2,7 @@ using System.Security.Cryptography;
 using EasyStock.Server.Configuration;
 using EasyStock.Server.DB;
 using EasyStock.Server.DB.Entities;
+using EasyStock.Server.Helpers;
 using EasyStock.Server.Models;
 using Microsoft.EntityFrameworkCore;
 using Microsoft.Extensions.Options;
@@ -21,14 +22,19 @@ public sealed partial class ImageHandler(IOptions<ServerOptions> options, ILogge
     public FileStream OpenRead(string sha256) =>
         new(PathFor(sha256), FileMode.Open, FileAccess.Read, FileShare.Read, 4096, useAsync: true);
 
-    /// <summary>Streams the body to a temp file next to the target while hashing, then moves it into place atomically.</summary>
-    /// <param name="quotaRemaining">Bytes still free under the storage cap; null for no check (the photo is already stored).</param>
-    public async Task<ImageSaveResult> SaveAsync(string sha256, Stream body, long? quotaRemaining, CancellationToken ct)
+    /// <summary>
+    /// Streams the body to a temp file next to the target while hashing and checking it. Nothing is visible yet: the
+    /// caller calls <see cref="Promote"/> under <see cref="ImagesHelper.LockKey"/> once the quota allows it, and
+    /// disposes the result (which deletes the temp file if it was not promoted).
+    /// </summary>
+    /// <param name="quotaHint">Early stop past this many bytes (a cheap pre-check, not the authoritative quota check).</param>
+    public async Task<StagedImage> StageAsync(string sha256, Stream body, long? quotaHint, CancellationToken ct)
     {
         var finalPath = PathFor(sha256);
         var dir = Path.GetDirectoryName(finalPath)!;
         Directory.CreateDirectory(dir);
         var temp = Path.Combine(dir, $".{Guid.NewGuid():N}.tmp");
+        var staged = new StagedImage(sha256, temp);
         try
         {
             long total = 0;
@@ -42,8 +48,8 @@ public sealed partial class ImageHandler(IOptions<ServerOptions> options, ILogge
                 int n;
                 while ((n = await body.ReadAsync(buffer, ct)) > 0)
                 {
-                    if (total + n > MaxBytes) return new ImageSaveResult(ImageSaveStatus.TooLarge);
-                    if (quotaRemaining is { } free && total + n > free) return new ImageSaveResult(ImageSaveStatus.QuotaExceeded);
+                    if (total + n > MaxBytes) return staged.Failed(ImageSaveStatus.TooLarge);
+                    if (quotaHint is { } free && total + n > free) return staged.Failed(ImageSaveStatus.QuotaExceeded);
                     for (var i = 0; i < n && headLen < head.Length; i++) head[headLen++] = buffer[i];
                     tail1 = n >= 2 ? buffer[n - 2] : tail2;
                     tail2 = buffer[n - 1];
@@ -53,18 +59,56 @@ public sealed partial class ImageHandler(IOptions<ServerOptions> options, ILogge
                 }
             }
             if (!LooksLikeJpeg(head, headLen, tail1, tail2, total))
-                return new ImageSaveResult(ImageSaveStatus.NotJpeg);
+                return staged.Failed(ImageSaveStatus.NotJpeg);
             if (!Convert.ToHexStringLower(hash.GetHashAndReset()).Equals(sha256, StringComparison.Ordinal))
-                return new ImageSaveResult(ImageSaveStatus.HashMismatch);
-
-            File.Move(temp, finalPath, overwrite: true);
-            LogStored(sha256, total);
-            return new ImageSaveResult(ImageSaveStatus.Saved, total);
+                return staged.Failed(ImageSaveStatus.HashMismatch);
+            staged.Status = ImageSaveStatus.Saved;
+            staged.Size = total;
+            return staged;
         }
-        finally
+        catch
         {
-            try { File.Delete(temp); } catch (IOException) { }
+            staged.Dispose();
+            throw;
         }
+    }
+
+    /// <summary>Moves a staged photo into place (atomically). Call it under <see cref="ImagesHelper.LockKey"/>.</summary>
+    public void Promote(StagedImage staged)
+    {
+        if (staged.Status != ImageSaveStatus.Saved) throw new InvalidOperationException("Only a valid staged photo can be promoted.");
+        File.Move(staged.TempPath, PathFor(staged.Sha256), overwrite: true);
+        staged.Promoted = true;
+        LogStored(staged.Sha256, staged.Size);
+    }
+
+    /// <summary>Deletes the photo file, if any.</summary>
+    public void DeleteFile(string sha256)
+    {
+        try { File.Delete(PathFor(sha256)); } catch (IOException) { }
+    }
+
+    /// <summary>
+    /// Inserts the <c>image</c> row of a staged photo, under the quota. Call it in a transaction holding
+    /// <see cref="ImagesHelper.LockKey"/> (<see cref="LockAsync"/>), so the used total cannot change between the check
+    /// and the insert. Already stored: <see cref="ImageSaveStatus.Saved"/> with no new bytes.
+    /// </summary>
+    public static async Task<(ImageSaveStatus Status, bool Inserted)> ReserveAsync(
+        EasyStockDbContext db, string sha256, long size, long quotaBytes, TimeProvider time, CancellationToken ct)
+    {
+        if (await db.Set<ImageRecord>().AnyAsync(i => i.Sha256 == sha256, ct)) return (ImageSaveStatus.Saved, false);
+        if (await UsedBytesAsync(db, ct) + size > quotaBytes) return (ImageSaveStatus.QuotaExceeded, false);
+        await db.Database.ExecuteSqlInterpolatedAsync(
+            $"INSERT INTO image (sha256, size, created_at) VALUES ({sha256}, {size}, {time.GetUtcNow().ToUnixTimeMilliseconds()})", ct);
+        return (ImageSaveStatus.Saved, true);
+    }
+
+    /// <summary>Takes the image advisory lock for the current transaction. Lock order: the sync lock first, then this one.</summary>
+    public static Task LockAsync(EasyStockDbContext db, CancellationToken ct)
+    {
+        if (db.Database.CurrentTransaction is null)
+            throw new InvalidOperationException("The image lock is transaction-scoped: begin a transaction first.");
+        return db.Database.ExecuteSqlAsync($"SELECT pg_advisory_xact_lock({ImagesHelper.LockKey})", ct);
     }
 
     /// <summary>
@@ -81,29 +125,38 @@ public sealed partial class ImageHandler(IOptions<ServerOptions> options, ILogge
         await db.Set<ImageRecord>().SumAsync(i => (long?)i.Size, ct) ?? 0;
 
     /// <summary>
-    /// Deletes the photos no article references, if they are older than <paramref name="olderThan"/> (a photo is uploaded
-    /// before the push that references it). Removes the file and the row; returns how many were deleted.
-    /// For the cleanup job to call; nothing calls it yet.
+    /// Deletes the <c>image</c> rows no article references (soft-deleted articles included: a tombstone keeps its
+    /// photo), if the photo was stored before <paramref name="olderThan"/> ago (a photo is uploaded before the push
+    /// that references it). Call it in a transaction holding the sync lock (no push in flight can reference a photo
+    /// unseen) and then <see cref="LockAsync"/> (no upload races the delete). Returns the deleted hashes: the caller
+    /// removes the files with <see cref="DeleteFile"/> after the commit, so a rollback never leaves a row without file.
     /// </summary>
-    public async Task<int> DeleteOrphansAsync(EasyStockDbContext db, TimeSpan olderThan, TimeProvider time, CancellationToken ct)
+    public static async Task<List<string>> DeleteOrphanRowsAsync(EasyStockDbContext db, TimeSpan olderThan, TimeProvider time, CancellationToken ct)
     {
         var cutoff = time.GetUtcNow().Add(-olderThan).ToUnixTimeMilliseconds();
         var orphans = await db.Set<ImageRecord>()
-            .Where(i => i.CreatedAt < cutoff
-                && !db.Set<Article>().Any(a => a.ImageSha256 == i.Sha256))
+            .Where(i => i.CreatedAt < cutoff && !db.Set<Article>().Any(a => a.ImageSha256 == i.Sha256))
             .Select(i => i.Sha256).ToListAsync(ct);
-        var deleted = 0;
-        foreach (var sha in orphans)
+        if (orphans.Count > 0)
+            await db.Set<ImageRecord>().Where(i => orphans.Contains(i.Sha256)).ExecuteDeleteAsync(ct);
+        return orphans;
+    }
+
+    /// <summary>
+    /// <see cref="DeleteOrphanRowsAsync"/> in a transaction of its own, then the files. Returns how many were deleted.
+    /// </summary>
+    public async Task<int> DeleteOrphansAsync(EasyStockDbContext db, TimeSpan olderThan, TimeProvider time, CancellationToken ct)
+    {
+        List<string> deleted;
+        await using (var tx = await db.Database.BeginTransactionAsync(ct))
         {
-            // Re-check in the delete itself: a push may have referenced the photo since the list was read.
-            var rows = await db.Set<ImageRecord>()
-                .Where(i => i.Sha256 == sha && !db.Set<Article>().Any(a => a.ImageSha256 == sha))
-                .ExecuteDeleteAsync(ct);
-            if (rows == 0) continue;
-            try { File.Delete(PathFor(sha)); } catch (IOException) { }
-            deleted++;
+            await db.AcquireSyncLockAsync(ct);
+            await LockAsync(db, ct);
+            deleted = await DeleteOrphanRowsAsync(db, olderThan, time, ct);
+            await tx.CommitAsync(ct);
         }
-        return deleted;
+        foreach (var sha in deleted) DeleteFile(sha);
+        return deleted.Count;
     }
 
     [LoggerMessage(Level = LogLevel.Information, Message = "Stored image {Sha256} ({Size} bytes)")]
