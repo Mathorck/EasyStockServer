@@ -79,8 +79,9 @@ public static class AuthHelpers
         return new TestUser(username, Password, await response.Read<TokenAnswer>());
     }
 
-    public static async Task<HttpResponseMessage> LoginAsync(this ApiFactory factory, string username, string password) =>
-        await factory.CreateVersionedClient().PostJson("/api/v1/auth/login", new { username, password, deviceName = "Pixel" });
+    /// <summary>A login from <paramref name="remoteIp"/>, or from a new random address when null.</summary>
+    public static async Task<HttpResponseMessage> LoginAsync(this ApiFactory factory, string username, string password, string? remoteIp = null) =>
+        await factory.CreateVersionedClient(remoteIp: remoteIp).PostJson("/api/v1/auth/login", new { username, password, deviceName = "Pixel" });
 
     public static async Task<HttpResponseMessage> RefreshAsync(this ApiFactory factory, string refreshToken) =>
         await factory.CreateVersionedClient().PostJson("/api/v1/auth/refresh", new { refreshToken });

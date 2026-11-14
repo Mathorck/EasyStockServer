@@ -18,6 +18,7 @@ public sealed partial class PasswordResetHandler(
     UserManager<AppUser> users,
     SessionHandler sessions,
     QrContentHandler qr,
+    PasswordAttemptLimiter attempts,
     TimeProvider time,
     ILogger<PasswordResetHandler> log)
 {
@@ -79,6 +80,7 @@ public sealed partial class PasswordResetHandler(
         await sessions.RevokeAllAsync(user.Id, AuthLimitsHelper.RevokeReasons.PasswordReset, keep: null, ct);
         var answer = await sessions.CreateAsync(user, request.DeviceName, ct);
         await tx.CommitAsync(ct);
+        attempts.Clear(user.Id);
         LogRedeemed(log, user.Id);
         return answer;
     }

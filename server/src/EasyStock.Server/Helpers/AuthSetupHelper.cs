@@ -56,6 +56,8 @@ public static class AuthSetupHelper
         services.AddSingleton<AccessTokenHandler>();
         services.AddSingleton<RefreshTokenHandler>();
         services.AddScoped<SessionHandler>();
+        services.AddHttpContextAccessor();
+        services.AddSingleton<PasswordAttemptLimiter>();
         services.AddScoped<PasswordAttemptHandler>();
         services.AddScoped<LoginHandler>();
         services.AddScoped<SetupHandler>();

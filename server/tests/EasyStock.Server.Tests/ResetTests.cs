@@ -28,9 +28,10 @@ public sealed class ResetTests(PostgresFixture pg) : IDisposable
     public async Task Reset_sets_the_password_and_ends_every_other_session()
     {
         var user = await _factory.CreateUserAsync();
-        var second = await (await _factory.LoginAsync(user.Username, user.Password)).Read<TokenAnswer>();
-        // A locked account can still be reset.
-        for (var i = 0; i < AuthLimitsHelper.MaxFailedLogins; i++) await _factory.LoginAsync(user.Username, "wrong password");
+        var ip = ApiFactory.RandomIp();
+        var second = await (await _factory.LoginAsync(user.Username, user.Password, ip)).Read<TokenAnswer>();
+        // A locked account can still be reset, and the reset lifts the lock.
+        for (var i = 0; i < AuthLimitsHelper.MaxFailedLogins; i++) await _factory.LoginAsync(user.Username, "wrong password", ip);
 
         var grant = await CreateReset(user.Id);
         Assert.StartsWith("easystock://reset?", grant.Qr);
@@ -42,8 +43,8 @@ public sealed class ResetTests(PostgresFixture pg) : IDisposable
         await (await _factory.RefreshAsync(second.RefreshToken)).Problem(HttpStatusCode.Unauthorized, "session-revoked");
         await (await _factory.GetMeAsync(second.AccessToken)).Problem(HttpStatusCode.Unauthorized, "session-revoked");
 
-        await (await _factory.LoginAsync(user.Username, user.Password)).Problem(HttpStatusCode.Unauthorized, "invalid-credentials");
-        Assert.Equal(HttpStatusCode.OK, (await _factory.LoginAsync(user.Username, NewPassword)).StatusCode);
+        await (await _factory.LoginAsync(user.Username, user.Password, ip)).Problem(HttpStatusCode.Unauthorized, "invalid-credentials");
+        Assert.Equal(HttpStatusCode.OK, (await _factory.LoginAsync(user.Username, NewPassword, ip)).StatusCode);
 
         await (await Redeem(grant.Token)).Problem(HttpStatusCode.Gone, "reset-used");
     }

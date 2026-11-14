@@ -23,7 +23,14 @@ public static class AuthLimitsHelper
     public static readonly TimeSpan ResetLifetime = TimeSpan.FromHours(24);
     public static readonly TimeSpan PromotionLifetime = TimeSpan.FromDays(7);
 
+    /// <summary>Failed passwords per account and client address before that pair is locked.</summary>
     public const int MaxFailedLogins = 5;
+
+    /// <summary>
+    /// Failed passwords per account from all addresses within <see cref="LockoutDuration"/> before the account is locked
+    /// everywhere: bounds guessing spread over many addresses.
+    /// </summary>
+    public const int MaxFailedLoginsPerAccount = 50;
     public static readonly TimeSpan LockoutDuration = TimeSpan.FromMinutes(15);
 
     public const int PasswordMinLength = 10;

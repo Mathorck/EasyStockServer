@@ -8,8 +8,8 @@ using Microsoft.AspNetCore.Identity;
 namespace EasyStock.Server.Handlers.Auth;
 
 /// <summary>
-/// <c>POST /auth/login</c>. The failed-attempt limit (5 failures, 15 minutes) is kept by
-/// <see cref="PasswordAttemptHandler"/>. An unknown user, a wrong password and a locked account all answer the same
+/// <c>POST /auth/login</c>. The failed-attempt limit (5 failures, 15 minutes, per account and client address) is kept
+/// by <see cref="PasswordAttemptHandler"/>. An unknown user, a wrong password and a locked account all answer the same
 /// 401 invalid-credentials, so the answer never reveals whether an account exists. "Disabled" is only told after a
 /// correct password, for the same reason.
 /// </summary>

@@ -80,17 +80,18 @@ public sealed class MeTests(PostgresFixture pg) : IDisposable
     public async Task Wrong_current_passwords_share_the_login_lockout()
     {
         var user = await _factory.CreateUserAsync();
-        Task<HttpResponseMessage> Change(string current) => _factory.CreateVersionedClient(user.AccessToken)
+        var ip = ApiFactory.RandomIp();
+        Task<HttpResponseMessage> Change(string current) => _factory.CreateVersionedClient(user.AccessToken, ip)
             .PostAsJsonAsync("/api/v1/me/password", new { currentPassword = current, newPassword = "another password" }, Ct);
 
         for (var i = 0; i < 4; i++)
             await (await Change("wrong password")).Problem(HttpStatusCode.BadRequest, "invalid-credentials");
-        // The fifth failure is a login: both count toward the same limit.
-        await (await _factory.LoginAsync(user.Username, "wrong password")).Problem(HttpStatusCode.Unauthorized, "invalid-credentials");
+        // The fifth failure is a login from the same address: both count toward the same limit.
+        await (await _factory.LoginAsync(user.Username, "wrong password", ip)).Problem(HttpStatusCode.Unauthorized, "invalid-credentials");
 
         var locked = await (await Change(user.Password)).Problem(HttpStatusCode.TooManyRequests, "rate-limited");
         Assert.True(locked.GetProperty("retryAfter").GetInt32() > 0);
-        await (await _factory.LoginAsync(user.Username, user.Password)).Problem(HttpStatusCode.Unauthorized, "invalid-credentials");
+        await (await _factory.LoginAsync(user.Username, user.Password, ip)).Problem(HttpStatusCode.Unauthorized, "invalid-credentials");
 
         _factory.Time.Advance(TimeSpan.FromMinutes(15) + TimeSpan.FromSeconds(1));
         Assert.Equal(HttpStatusCode.NoContent, (await Change(user.Password)).StatusCode);

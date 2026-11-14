@@ -94,7 +94,9 @@ What the optional EasyStock server is, how it is built, and how it behaves. The 
 * No email address is stored.
 * Passwords need at least 10 characters and at most 128, with no other rule.
 * Passwords are hashed by Identity's default password hasher.
-* An account locks for 15 minutes after 5 failed passwords. Wrong current passwords on `POST /me/password` count too.
+* An account locks for 15 minutes after 5 failed passwords from one client address (IPv4 address, or IPv6 /64), for that address only: someone who knows a username cannot lock its owner out from elsewhere. Wrong current passwords on `POST /me/password` count too.
+* 50 failed passwords for one account within 15 minutes, from any addresses, lock it everywhere for 15 minutes, so guessing spread over many addresses stays bounded.
+* The counters are kept in memory only (no IP address in the database) and a password reset clears them.
 * Login answers `invalid-credentials` alike for an unknown user, a wrong password and a locked account, so it never tells whether an account exists.
 * Guest accounts have no username and no password hash.
 * The short code is 6 characters from an alphabet without look-alike characters (no 0/O, 1/I), derived from the user ID.
