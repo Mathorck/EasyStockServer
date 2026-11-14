@@ -1,5 +1,6 @@
 # syntax=docker/dockerfile:1
-FROM --platform=$BUILDPLATFORM mcr.microsoft.com/dotnet/sdk:10.0 AS build
+# Base images pinned by multi-arch index digest (update with: docker buildx imagetools inspect <image>).
+FROM --platform=$BUILDPLATFORM mcr.microsoft.com/dotnet/sdk:10.0@sha256:fe0fd4e93bd2fbb47c883b7a6369e5c8d3db8bf01cdc5981f6ee35fbdf3ff4fb AS build
 ARG TARGETARCH
 ARG VERSION=0.0.0
 WORKDIR /src
@@ -13,7 +14,7 @@ COPY src/ src/
 RUN dotnet publish src/EasyStock.Server -c Release -a "$(cat /arch)" --no-restore \
     -p:Version="$VERSION" -p:UseAppHost=false -p:OpenApiGenerateDocuments=false -o /out
 
-FROM mcr.microsoft.com/dotnet/aspnet:10.0
+FROM mcr.microsoft.com/dotnet/aspnet:10.0@sha256:bfd912c83295ce66d4b706ebb8541b9f14259b0e76fbb88b2751f58ce2399d2e
 ARG VERSION=0.0.0
 LABEL org.opencontainers.image.source="https://github.com/Mathorck/EasyStockServer" \
       org.opencontainers.image.version="$VERSION"
