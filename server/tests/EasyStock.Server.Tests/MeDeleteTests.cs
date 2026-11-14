@@ -168,6 +168,36 @@ public sealed class MeDeleteTests(PostgresFixture pg)
     }
 
     [Fact]
+    public async Task A_guest_sending_an_empty_json_object_is_deleted_at_once_and_loses_its_push_registration()
+    {
+        // What the app sends: "{}" with Content-Type application/json, so password is null.
+        using var factory = await NewServer();
+        var guest = await factory.SignInAsync(Role.Guest);
+        await factory.WithDb(async db =>
+        {
+            db.Set<PushRegistration>().Add(new PushRegistration
+            {
+                DeviceSessionId = guest.SessionId, Endpoint = "https://ntfy.example.org/upSECRET?up=1", CreatedAt = 1, UpdatedAt = 1,
+            });
+            await db.SaveChangesAsync(Ct);
+        });
+        var request = new HttpRequestMessage(HttpMethod.Delete, "/api/v1/me") { Content = new StringContent("{}") };
+        request.Content.Headers.ContentType = new System.Net.Http.Headers.MediaTypeHeaderValue("application/json");
+
+        var response = await factory.CreateVersionedClient(guest.AccessToken).SendAsync(request, Ct);
+
+        Assert.Equal(HttpStatusCode.NoContent, response.StatusCode);
+        await factory.WithDb(async db =>
+        {
+            var row = await db.Users.AsNoTracking().SingleAsync(u => u.Id == guest.UserId, Ct);
+            Assert.NotNull(row.DeletedAt);
+            Assert.Equal("Deleted user", row.DisplayName);
+            Assert.False(await db.Set<PushRegistration>().AnyAsync(p => p.DeviceSessionId == guest.SessionId, Ct));
+        });
+        await (await factory.GetMeAsync(guest.AccessToken)).Problem(HttpStatusCode.Unauthorized, "session-revoked");
+    }
+
+    [Fact]
     public async Task A_guest_may_also_send_a_body()
     {
         using var factory = await NewServer();
