@@ -22,7 +22,7 @@ public sealed class MeDataTests(PostgresFixture pg) : IDisposable
     private Task<HttpResponseMessage> GetData(string accessToken) =>
         _factory.CreateVersionedClient(accessToken).GetAsync("/api/v1/me/data", Ct);
 
-    private async Task<(Guid Mine, Guid Theirs)> AddMovements(Guid me, Guid other)
+    private async Task<(Guid Mine, Guid Theirs, Guid MyAlert, Guid TheirAlert)> AddMovements(Guid me, Guid other)
     {
         var category = new Category { Id = Guid.NewGuid(), Name = "cat" + Guid.NewGuid().ToString("N")[..8], CreatedAt = 1, UpdatedAt = 1 };
         var location = new Location { Id = Guid.NewGuid(), Name = "Shelf A", CreatedAt = 1, UpdatedAt = 1 };
@@ -34,15 +34,21 @@ public sealed class MeDataTests(PostgresFixture pg) : IDisposable
         };
         var mine = Movement(me, -2500);
         var theirs = Movement(other, 4000);
+        LowStockAlert Alert(Guid by, long stock) => new()
+        {
+            Id = Guid.NewGuid(), ArticleId = article.Id, CrossedAt = 1762859000000, Stock = stock, CausedByUserId = by,
+        };
+        var myAlert = Alert(me, 1500);
+        var theirAlert = Alert(other, 500);
         await _factory.WithDb(async db =>
         {
-            foreach (object row in new object[] { category, location, article, mine, theirs })
+            foreach (object row in new object[] { category, location, article, mine, theirs, myAlert, theirAlert })
             {
                 db.Add(row);
                 await db.SaveChangesAsync(Ct);
             }
         });
-        return (mine.Id, theirs.Id);
+        return (mine.Id, theirs.Id, myAlert.Id, theirAlert.Id);
     }
 
     [Fact]
@@ -50,7 +56,7 @@ public sealed class MeDataTests(PostgresFixture pg) : IDisposable
     {
         var user = await _factory.CreateUserAsync(Role.Member);
         var other = await _factory.CreateUserAsync(Role.Member);
-        var (mine, theirs) = await AddMovements(user.Id, other.Id);
+        var (mine, theirs, myAlert, theirAlert) = await AddMovements(user.Id, other.Id);
         Guid sessionId = default;
         await _factory.WithDb(async db =>
         {
@@ -102,6 +108,14 @@ public sealed class MeDataTests(PostgresFixture pg) : IDisposable
         Assert.Equal("ntfy.example.org", push.GetProperty("endpointHost").GetString());
         Assert.Equal("2025-11-11T11:03:20Z", push.GetProperty("createdAt").GetString());
 
+        // Only the alerts the user caused.
+        var alert = root.GetProperty("lowStockAlerts").EnumerateArray().Single();
+        Assert.Equal(myAlert, alert.GetProperty("id").GetGuid());
+        Assert.Equal("Screws", alert.GetProperty("articleName").GetString());
+        Assert.Equal(1500, alert.GetProperty("stock").GetInt64());
+        Assert.Equal("2025-11-11T11:03:20Z", alert.GetProperty("crossedAt").GetString());
+        Assert.True(alert.TryGetProperty("articleId", out _));
+
         var movement = root.GetProperty("movements").EnumerateArray().Single();
         Assert.Equal(mine, movement.GetProperty("id").GetGuid());
         Assert.Equal(-2500, movement.GetProperty("quantity").GetInt64());
@@ -113,6 +127,7 @@ public sealed class MeDataTests(PostgresFixture pg) : IDisposable
 
         // Nothing of the other user, no secret.
         Assert.DoesNotContain(theirs.ToString(), body);
+        Assert.DoesNotContain(theirAlert.ToString(), body);
         Assert.DoesNotContain(other.Id.ToString(), body);
         Assert.DoesNotContain(other.Username, body);
         Assert.DoesNotContain(PushSecret, body);
@@ -143,6 +158,7 @@ public sealed class MeDataTests(PostgresFixture pg) : IDisposable
         Assert.Single(doc.RootElement.GetProperty("devices").EnumerateArray());
         Assert.Empty(doc.RootElement.GetProperty("movements").EnumerateArray());
         Assert.Empty(doc.RootElement.GetProperty("pushRegistrations").EnumerateArray());
+        Assert.Empty(doc.RootElement.GetProperty("lowStockAlerts").EnumerateArray());
     }
 
     [Fact]

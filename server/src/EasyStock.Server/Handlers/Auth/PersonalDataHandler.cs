@@ -11,8 +11,8 @@ namespace EasyStock.Server.Handlers.Auth;
 
 /// <summary>
 /// <c>GET /me/data</c>: the caller's personal data as JSON (GDPR art. 15 and 20, nFADP art. 25 and 28). Holds the
-/// account, the device sessions, the push registrations (endpoint host only, the URL holds a secret) and the
-/// movements the user made. Never password hashes, security stamps, tokens or token hashes, and nothing of other
+/// account, the device sessions, the push registrations (endpoint host only, the URL holds a secret), the
+/// low-stock alerts the user caused and the movements the user made. Never password hashes, security stamps, tokens or token hashes, and nothing of other
 /// users. The movements are streamed from the database to the response, so a long history is never held in memory.
 /// </summary>
 public sealed class PersonalDataHandler(EasyStockDbContext db, IOptions<ServerOptions> options, TimeProvider time)
@@ -99,6 +99,29 @@ public sealed class PersonalDataHandler(EasyStockDbContext db, IOptions<ServerOp
         }
         w.WriteEndArray();
 
+        // Low-stock alerts a movement of the user caused (low_stock_alert.caused_by_user_id).
+        w.WriteStartArray("lowStockAlerts");
+        var lowStockAlerts = (
+            from x in db.Set<LowStockAlert>().AsNoTracking()
+            where x.CausedByUserId == userId
+            join a in db.Articles on x.ArticleId equals a.Id into articles
+            from a in articles.DefaultIfEmpty()
+            orderby x.CrossedAt, x.Id
+            select new { x.Id, x.ArticleId, ArticleName = a.Name, x.CrossedAt, x.Stock }).AsAsyncEnumerable();
+        var n = 0;
+        await foreach (var x in lowStockAlerts.WithCancellation(ct))
+        {
+            w.WriteStartObject();
+            w.WriteString("id", x.Id);
+            w.WriteString("articleId", x.ArticleId);
+            w.WriteString("articleName", x.ArticleName);
+            w.WriteString("crossedAt", FromEpochMs(x.CrossedAt));
+            w.WriteNumber("stock", x.Stock);
+            w.WriteEndObject();
+            if (++n % FlushEvery == 0) await w.FlushAsync(ct);
+        }
+        w.WriteEndArray();
+
         w.WriteStartArray("movements");
         var movements = (
             from m in db.StockMovements.AsNoTracking()
@@ -113,7 +136,6 @@ public sealed class PersonalDataHandler(EasyStockDbContext db, IOptions<ServerOp
                 m.Id, m.OccurredAt, m.CreatedAt, m.ArticleId, ArticleName = a.Name, m.ItemId, m.LocationId,
                 LocationName = l.Name, m.Quantity, m.Reason, m.Comment, m.DeviceId,
             }).AsAsyncEnumerable();
-        var n = 0;
         await foreach (var m in movements.WithCancellation(ct))
         {
             w.WriteStartObject();

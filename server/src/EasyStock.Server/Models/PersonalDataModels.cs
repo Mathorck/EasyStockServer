@@ -12,6 +12,7 @@ public sealed record PersonalDataExport(
     IReadOnlyList<PersonalDataDevice> Devices,
     IReadOnlyList<PersonalDataSession> Sessions,
     IReadOnlyList<PersonalDataPushRegistration> PushRegistrations,
+    IReadOnlyList<PersonalDataLowStockAlert> LowStockAlerts,
     IReadOnlyList<PersonalDataMovement> Movements);
 
 public sealed record PersonalDataServer(string PublicUrl);
@@ -31,6 +32,9 @@ public sealed record PersonalDataSession(
 
 /// <summary>Only the host of the UnifiedPush endpoint: the full URL holds a secret.</summary>
 public sealed record PersonalDataPushRegistration(Guid DeviceId, string? EndpointHost, DateTimeOffset CreatedAt, DateTimeOffset UpdatedAt);
+
+/// <summary>A low-stock alert a movement of the user caused. Stock in thousandths, at the moment it went below the threshold.</summary>
+public sealed record PersonalDataLowStockAlert(Guid Id, Guid ArticleId, string? ArticleName, DateTimeOffset CrossedAt, long Stock);
 
 /// <summary>A movement the user made. Quantity in thousandths, as stored; reason as stored (consumption...).</summary>
 public sealed record PersonalDataMovement(

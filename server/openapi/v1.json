@@ -6537,6 +6537,7 @@
           "devices",
           "sessions",
           "pushRegistrations",
+          "lowStockAlerts",
           "movements"
         ],
         "type": "object",
@@ -6577,11 +6578,55 @@
               "$ref": "#/components/schemas/PersonalDataPushRegistration"
             }
           },
+          "lowStockAlerts": {
+            "type": "array",
+            "items": {
+              "$ref": "#/components/schemas/PersonalDataLowStockAlert"
+            }
+          },
           "movements": {
             "type": "array",
             "items": {
               "$ref": "#/components/schemas/PersonalDataMovement"
             }
+          }
+        }
+      },
+      "PersonalDataLowStockAlert": {
+        "required": [
+          "id",
+          "articleId",
+          "articleName",
+          "crossedAt",
+          "stock"
+        ],
+        "type": "object",
+        "properties": {
+          "id": {
+            "type": "string",
+            "format": "uuid"
+          },
+          "articleId": {
+            "type": "string",
+            "format": "uuid"
+          },
+          "articleName": {
+            "type": [
+              "null",
+              "string"
+            ]
+          },
+          "crossedAt": {
+            "type": "string",
+            "format": "date-time"
+          },
+          "stock": {
+            "pattern": "^-?(?:0|[1-9]\\d*)$",
+            "type": [
+              "integer",
+              "string"
+            ],
+            "format": "int64"
           }
         }
       },

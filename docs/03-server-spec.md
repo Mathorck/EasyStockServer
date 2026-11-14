@@ -200,12 +200,13 @@ Personal data export (`formatVersion` 1; times are ISO 8601 UTC; movements are s
   "devices": [ { "id": "…", "name": "Pixel", "createdAt": "…", "lastSeenAt": "…" } ],
   "sessions": [ { "deviceId": "…", "createdAt": "…", "lastUsedAt": "…", "expiresAt": "…", "revokedAt": null, "revokeReason": null } ],
   "pushRegistrations": [ { "deviceId": "…", "endpointHost": "ntfy.example.org", "createdAt": "…", "updatedAt": "…" } ],
+  "lowStockAlerts": [ { "id": "…", "articleId": "…", "articleName": "Screws", "crossedAt": "…", "stock": 1500 } ],
   "movements": [ { "id": "…", "occurredAt": "…", "createdAt": "…", "articleId": "…", "articleName": "Screws", "itemId": null,
                    "locationId": "…", "locationName": "Shelf A", "quantity": -2000, "reason": "consumption", "comment": null, "deviceId": "…" } ]
 }
 ```
 
-* A device is a device session, so `devices` and `sessions` describe the same rows; `expiresAt` is null once revoked. `username` is null for a Guest. `quantity` is in thousandths, as stored.
+* A device is a device session, so `devices` and `sessions` describe the same rows; `expiresAt` is null once revoked. `username` is null for a Guest. `lowStockAlerts` are the alerts a movement of the user caused, oldest first. `quantity` and `stock` are in thousandths, as stored.
 * Never in the export: password hashes, security stamps, tokens or token hashes, the full push endpoint URL (it holds a secret), or any other user's data.
 
 ### Sync
@@ -386,7 +387,7 @@ Pull answer:
 * Logs never contain passwords, tokens, display names or row content; they contain user IDs only.
 * A movement always keeps who made it. There is no retention setting.
 * Deleting a user keeps their movements (stock needs them) but drops the link to a name.
-* Users can download their data (`GET /me/data`, right of access and portability): account, devices, sessions, push registrations (endpoint host only) and the movements they made, as JSON. Never password hashes, tokens or other users' data.
+* Users can download their data (`GET /me/data`, right of access and portability): account, devices, sessions, push registrations (endpoint host only), the low-stock alerts they caused and the movements they made, as JSON. Never password hashes, tokens or other users' data.
 * Users can delete their own account (`DELETE /me`, with their password; Guests need none); the last active Admin cannot. It erases, like an Admin delete, a Guest logout and the 90-day Guest cleanup:
   * the username (set to null, so it can be taken again), the display name (replaced by "Deleted user"), the password hash, the alert preference, last seen and the lockout state;
   * the device names of all the user's sessions (replaced by "Deleted device"); every session is revoked and its push registration deleted;
