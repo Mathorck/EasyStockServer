@@ -43,3 +43,9 @@ public sealed record ChangePasswordRequest([Required] string CurrentPassword, [R
 {
     public override string ToString() => "ChangePasswordRequest";
 }
+
+/// <summary><c>DELETE /me</c>: the current password; optional for an account without one (a Guest).</summary>
+public sealed record DeleteMeRequest(string? Password)
+{
+    public override string ToString() => "DeleteMeRequest";
+}

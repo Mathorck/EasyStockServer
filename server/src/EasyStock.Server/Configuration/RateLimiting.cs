@@ -11,12 +11,18 @@ namespace EasyStock.Server.Configuration;
 /// <summary>
 /// Rate limits (docs/03-server-spec.md, "Rate limits"): <see cref="AuthIp"/> (10 per minute per IP) on login,
 /// setup, invite redeem, Guest signup, reset, complete-promotion and
-/// <c>POST /me/password</c>; every other /api call 120 per minute per
+/// <c>POST /me/password</c> and <c>DELETE /me</c>; <see cref="MeData"/> (5 per hour per user) on <c>GET /me/data</c>, on top of
+/// the default; every other /api call 120 per minute per
 /// device session, or per IP without a valid token; <c>/health</c> and <c>/openapi</c> 30 per minute per IP. Rejections are 429 <c>rate-limited</c> with Retry-After.
 /// </summary>
 public static class RateLimiting
 {
     public const string AuthIp = "auth-ip";
+
+    /// <summary>The personal data export, <see cref="MeDataPerHour"/> per user (or per IP without a valid token).</summary>
+    public const string MeData = "me-data";
+
+    public const int MeDataPerHour = 5;
 
     /// <summary>Requests per minute per IP on <c>/health</c> and <c>/openapi</c>.</summary>
     public const int PublicPerMinute = 30;
@@ -39,6 +45,19 @@ public static class RateLimiting
 
             o.AddPolicy(AuthIp, ctx => RateLimitPartition.GetFixedWindowLimiter(
                 ClientIp.Key(ctx), _ => PerMinute(10)));
+
+            o.AddPolicy(MeData, ctx =>
+            {
+                var sub = ctx.User.FindFirst(Microsoft.IdentityModel.JsonWebTokens.JwtRegisteredClaimNames.Sub)?.Value;
+                return RateLimitPartition.GetFixedWindowLimiter(sub is null ? "ip:" + ClientIp.Key(ctx) : "user:" + sub,
+                    _ => new FixedWindowRateLimiterOptions
+                    {
+                        PermitLimit = MeDataPerHour,
+                        Window = TimeSpan.FromHours(1),
+                        QueueLimit = 0,
+                        AutoReplenishment = true,
+                    });
+            });
 
             // The default: a global limiter, so controllers added later are covered without any attribute.
             o.GlobalLimiter = PartitionedRateLimiter.Create<HttpContext, string>(ctx =>

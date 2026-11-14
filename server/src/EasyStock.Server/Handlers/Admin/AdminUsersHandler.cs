@@ -18,6 +18,7 @@ namespace EasyStock.Server.Handlers.Admin;
 public sealed partial class AdminUsersHandler(
     EasyStockDbContext db,
     SessionHandler sessions,
+    AccountDeletionHandler deletion,
     TimeProvider time,
     ILogger<AdminUsersHandler> log)
 {
@@ -89,29 +90,13 @@ public sealed partial class AdminUsersHandler(
         return await GetAsync(id, ct);
     }
 
-    /// <summary>Soft delete. 404 not-found, 409 last-admin.</summary>
+    /// <summary>
+    /// Soft delete that erases the personal data (<see cref="AccountsHelper.EraseAccountAsync"/>). 404 not-found,
+    /// 409 last-admin.
+    /// </summary>
     public async Task DeleteAsync(Guid id, CancellationToken ct)
     {
-        var now = time.GetUtcNow();
-        await using var tx = await db.Database.BeginTransactionAsync(ct);
-        await db.LockAsync(AuthLimitsHelper.AdminChangeLockKey, ct);
-        var user = await FindAsync(id, ct);
-        if (IsActiveAdmin(user)) await EnsureAnotherAdminAsync(id, ct);
-
-        // The row stays (movements point at it, phones pull it); everything that identifies or lets the person in goes.
-        user.DeletedAt = now;
-        user.DisplayName = DeletedDisplayName;
-        user.UserName = null;
-        user.NormalizedUserName = null;
-        user.PasswordHash = null;
-        user.SecurityStamp = Guid.NewGuid().ToString("N");
-        user.AlertsEnabled = null;
-        await db.SaveChangesAsync(ct);
-        await sessions.RevokeAllAsync(id, AuthLimitsHelper.RevokeReasons.Deleted, keep: null, ct);
-        await db.Promotions.Where(p => p.UserId == id && p.EndedAt == null)
-            .ExecuteUpdateAsync(s => s.SetProperty(x => x.EndedAt, now).SetProperty(x => x.EndReason, Promotion.Cancelled), ct);
-        await db.PasswordResets.Where(r => r.UserId == id && r.UsedAt == null).ExecuteDeleteAsync(ct);
-        await tx.CommitAsync(ct);
+        await deletion.DeleteAsync(id, ct);
         LogDeleted(log, id);
     }
 
@@ -122,15 +107,9 @@ public sealed partial class AdminUsersHandler(
         await db.Users.SingleOrDefaultAsync(u => u.Id == id && u.DeletedAt == null, ct)
         ?? throw ProblemException.Of(StatusCodes.Status404NotFound, ProblemTypesHelper.NotFound);
 
-    private static bool IsActiveAdmin(AppUser u) =>
-        u.Role == Role.Admin && u.Kind == UserKind.Full && u.DisabledAt is null && u.DeletedAt is null;
+    private static bool IsActiveAdmin(AppUser u) => AccountsHelper.IsActiveAdmin(u);
 
-    private async Task EnsureAnotherAdminAsync(Guid id, CancellationToken ct)
-    {
-        var others = await db.Users.AnyAsync(u => u.Id != id && u.Role == Role.Admin && u.Kind == UserKind.Full
-            && u.DisabledAt == null && u.DeletedAt == null, ct);
-        if (!others) throw ProblemException.Of(StatusCodes.Status409Conflict, ProblemTypesHelper.LastAdmin);
-    }
+    private Task EnsureAnotherAdminAsync(Guid id, CancellationToken ct) => AccountsHelper.EnsureAnotherAdminAsync(db, id, ct);
 
     [LoggerMessage(Level = LogLevel.Information, Message = "Admin changed user {UserId}")]
     private static partial void LogUpdated(ILogger log, Guid userId);

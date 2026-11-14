@@ -66,6 +66,8 @@ public static class AuthSetupHelper
         services.AddScoped<PasswordResetHandler>();
         services.AddScoped<PromotionHandler>();
         services.AddScoped<AccountHandler>();
+        services.AddScoped<AccountDeletionHandler>();
+        services.AddScoped<PersonalDataHandler>();
         services.AddScoped<AdminUsersHandler>();
 
         if (startupSteps)

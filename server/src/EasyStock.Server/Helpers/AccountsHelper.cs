@@ -78,20 +78,50 @@ public static class AccountsHelper
             extensions: new Dictionary<string, object?> { ["errors"] = errors });
     }
 
+    /// <summary>Device name left on the sessions of a deleted account.</summary>
+    public const string DeletedDeviceName = "Deleted device";
+
     /// <summary>
-    /// Soft-deletes a Guest (logout, or the cleanup job after 90 days unseen) and cancels its pending promotion. The
-    /// row stays, like an Admin deleting a full account: a hard delete would leave no <c>users.server_seq</c> bump, so
-    /// other phones would keep the Guest's name for ever, and movements point at it. The trigger bumps the seq when
-    /// <c>deleted_at</c> changes, and phones pull "Deleted user". The caller handles the sessions and the transaction.
+    /// Soft-deletes an account and erases its personal data (Admin delete, <c>DELETE /me</c>, Guest logout and the
+    /// Guest cleanup). The row stays: movements point at it, and a hard delete would leave no <c>users.server_seq</c>
+    /// bump, so other phones would keep the name for ever. The trigger bumps the seq when <c>deleted_at</c> and
+    /// <c>display_name</c> change, and phones pull "Deleted user". Erased: username (null, so it is free again),
+    /// display name, password hash, alert preference, last seen, lockout state, the device names of every session,
+    /// every password reset of the user; a pending promotion is cancelled. Stock movements and low-stock alerts keep
+    /// the user ID and are never touched. The caller revokes the sessions (which drops the push registrations) and
+    /// owns the transaction.
     /// </summary>
-    public static async Task SoftDeleteGuestAsync(EasyStockDbContext db, AppUser user, DateTimeOffset now, CancellationToken ct)
+    public static async Task EraseAccountAsync(EasyStockDbContext db, AppUser user, DateTimeOffset now, CancellationToken ct)
     {
         user.DeletedAt = now;
         user.DisplayName = Handlers.Admin.AdminUsersHandler.DeletedDisplayName;
+        user.UserName = null;
+        user.NormalizedUserName = null;
+        user.PasswordHash = null;
         user.SecurityStamp = Guid.NewGuid().ToString("N");
+        user.AlertsEnabled = null;
+        user.LastSeenAt = null;
+        user.LockoutEnd = null;
+        user.AccessFailedCount = 0;
         await db.SaveChangesAsync(ct);
-        await db.Promotions.Where(p => p.UserId == user.Id && p.EndedAt == null)
+        var id = user.Id;
+        await db.DeviceSessions.Where(s => s.UserId == id && s.DeviceName != DeletedDeviceName)
+            .ExecuteUpdateAsync(s => s.SetProperty(x => x.DeviceName, DeletedDeviceName), ct);
+        await db.Promotions.Where(p => p.UserId == id && p.EndedAt == null)
             .ExecuteUpdateAsync(s => s.SetProperty(x => x.EndedAt, now).SetProperty(x => x.EndReason, Promotion.Cancelled), ct);
+        await db.PasswordResets.Where(r => r.UserId == id).ExecuteDeleteAsync(ct);
+    }
+
+    /// <summary>An Admin that counts for the last-Admin rule: full account, not disabled, not deleted.</summary>
+    public static bool IsActiveAdmin(AppUser u) =>
+        u.Role == Role.Admin && u.Kind == UserKind.Full && u.DisabledAt is null && u.DeletedAt is null;
+
+    /// <summary>409 last-admin unless another active Admin than <paramref name="id"/> exists. Call under <see cref="AuthLimitsHelper.AdminChangeLockKey"/>.</summary>
+    public static async Task EnsureAnotherAdminAsync(EasyStockDbContext db, Guid id, CancellationToken ct)
+    {
+        var others = await db.Users.AnyAsync(u => u.Id != id && u.Role == Role.Admin && u.Kind == UserKind.Full
+            && u.DisabledAt == null && u.DeletedAt == null, ct);
+        if (!others) throw ProblemException.Of(StatusCodes.Status409Conflict, ProblemTypesHelper.LastAdmin);
     }
 
     public static Task LockAsync(this EasyStockDbContext db, long key, CancellationToken ct) =>

@@ -30,13 +30,13 @@ public sealed class CleanupHandler(EasyStockDbContext db, ImageHandler images, T
             .SingleAsync(ct);
         if (!locked) return null;
 
-        // Guests not seen for 90 days: soft-deleted like on logout (the row stays for the movements and the phones),
+        // Guests not seen for 90 days: soft-deleted and erased like on logout (the row stays for the movements and the phones),
         // and their sessions are deleted below.
         var guestCutoff = now - CleanupHelper.GuestInactivity;
         var guests = await db.Users
             .Where(u => u.Kind == UserKind.Guest && u.DeletedAt == null && (u.LastSeenAt ?? u.CreatedAt) < guestCutoff)
             .ToListAsync(ct);
-        foreach (var guest in guests) await AccountsHelper.SoftDeleteGuestAsync(db, guest, now, ct);
+        foreach (var guest in guests) await AccountsHelper.EraseAccountAsync(db, guest, now, ct);
         var guestIds = guests.Select(g => g.Id).ToList();
         db.ChangeTracker.Clear();
 
