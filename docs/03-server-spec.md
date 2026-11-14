@@ -59,6 +59,7 @@ What the optional EasyStock server is, how it is built, and how it behaves. The 
 * `stock_movement` gets `created_by` (user ID) and `device_id`, set by the server from the access token, never from the phone.
 * `article.image_path` is replaced on the server by `image_sha256`, since the server stores photos by hash.
 * Unique indexes match the app (`sku`, `barcode`, category name, attribute key, serial number) and are not filtered: the app's schema has no filter, and a value the app clears on soft delete is NULL, which PostgreSQL never counts as a duplicate.
+* Plain (non-unique) lookup indexes on `lower(name)` (category), `lower(sku)` (article) and `lower(serial_number)` (item) serve the push's case-insensitive conflict checks, and `stock_movement(created_by)` serves the pull's author filter.
 
 ## Server-only tables
 
