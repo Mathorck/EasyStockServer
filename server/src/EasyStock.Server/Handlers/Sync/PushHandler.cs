@@ -49,6 +49,19 @@ public sealed partial class PushHandler(
 
         /// <summary>Articles whose stock or threshold rules may have changed.</summary>
         public HashSet<Guid> TouchedArticles { get; } = [];
+
+        /// <summary>
+        /// Rows known to exist (entity type, ID), soft-deleted ones included. Nothing is hard-deleted under the sync
+        /// lock, so a row seen once stays: reference checks skip the query.
+        /// </summary>
+        public HashSet<(Type Type, Guid Id)> Known { get; } = [];
+
+        /// <summary>
+        /// IDs of the current table that did not exist when the table's rows were ordered and that no row of this
+        /// batch has used yet: such a row has no server version, so it is not looked up. A row of the batch can only
+        /// create its own ID, so the first use of each ID is enough.
+        /// </summary>
+        public HashSet<Guid> Absent { get; } = [];
     }
 
     /// <param name="datasetEpoch">The phone's X-EasyStock-Dataset-Epoch header, or null.</param>
@@ -90,7 +103,7 @@ public sealed partial class PushHandler(
         foreach (var table in PushTablesHelper.PushOrder)
         {
             if (!rows.TryGetValue(table, out var tableRows)) continue;
-            foreach (var row in await OrderAsync(table, tableRows.Select(Parse).ToList(), ct))
+            foreach (var row in await OrderAsync(table, tableRows.Select(Parse).ToList(), state, ct))
                 results.Add(await ProcessRowAsync(table, row, state, ct));
         }
         foreach (var (table, tableRows) in rows.Where(t => !PushTablesHelper.PushOrder.Contains(t.Key)))
@@ -133,10 +146,14 @@ public sealed partial class PushHandler(
     /// Rows that update a server row first, so a rename frees its old value before a new row asks for it. Then,
     /// for locations, parents before children within the batch.
     /// </summary>
-    private async Task<IReadOnlyList<Pending>> OrderAsync(string table, List<Pending> rows, CancellationToken ct)
+    private async Task<IReadOnlyList<Pending>> OrderAsync(string table, List<Pending> rows, BatchState state, CancellationToken ct)
     {
         var ids = rows.Where(r => r.Id is not null).Select(r => r.Id!.Value).Distinct().ToList();
         var existing = (await ExistingIdsAsync(table, ids, ct)).ToHashSet();
+        var type = PushTablesHelper.EntityType(table)!;
+        foreach (var id in existing) state.Known.Add((type, id));
+        state.Absent.Clear();
+        state.Absent.UnionWith(ids.Where(id => !existing.Contains(id)));
         var ordered = rows.Where(r => r.Id is { } id && existing.Contains(id))
             .Concat(rows.Where(r => r.Id is not { } id || !existing.Contains(id)))
             .ToList();
@@ -196,8 +213,9 @@ public sealed partial class PushHandler(
             var rawId = pending.RawId;
             var type = PushTablesHelper.EntityType(table)!;
 
-            // Including soft-deleted rows: the push may restore one, and references to them are valid.
-            var existing = await db.FindAsync(type, [id], ct);
+            // Including soft-deleted rows: the push may restore one, and references to them are valid. An ID that was
+            // absent when the table was ordered, used for the first time in the batch, has no server row.
+            var existing = state.Absent.Remove(id) ? null : await db.FindAsync(type, [id], ct);
             var incoming = PushRowCodecHelper.TryRead(table, pending.Row);
             if (incoming is null || !PushRowCodecHelper.TryReadBaseSeq(pending.Row, out var baseSeq))
                 return Rejected(table, rawId, SyncPushReasonHelper.Invalid, existing);
@@ -220,7 +238,7 @@ public sealed partial class PushHandler(
                 return Rejected(table, rawId, SyncPushReasonHelper.NotAllowed, existing);
             if (!PushRowValidatorHelper.IsValid(incoming))
                 return Rejected(table, rawId, SyncPushReasonHelper.Invalid, existing);
-            if (await ReferenceProblemAsync(incoming, ct) is { } problem)
+            if (await ReferenceProblemAsync(incoming, state, ct) is { } problem)
                 return Rejected(table, rawId, problem, existing);
 
             // First change wins: an edit of a server row must be based on its current version. A stale one (or one
@@ -241,6 +259,7 @@ public sealed partial class PushHandler(
                     db.ChangeTracker.Clear();
                     return Rejected(table, rawId, reason, await db.FindAsync(type, [id], ct));
                 }
+                if (target is null) state.Known.Add((type, id));
             }
             if (incoming is Article article) state.TouchedArticles.Add(article.Id);
             if (incoming is StockMovement movement) state.TouchedArticles.Add(movement.ArticleId);
@@ -430,8 +449,10 @@ public sealed partial class PushHandler(
     /// Referenced rows must exist, soft-deleted or not: a movement for a deleted article is accepted, because stock
     /// truth wins. A unit of another article is invalid. A second open review for a location is review-open.
     /// </summary>
-    private async Task<string?> ReferenceProblemAsync(object row, CancellationToken ct)
+    private async Task<string?> ReferenceProblemAsync(object row, BatchState state, CancellationToken ct)
     {
+        Task<bool> ExistsAsync<T>(Guid? id, CancellationToken token) where T : class => KnownOrExistsAsync<T>(id, state, token);
+
         const string missing = SyncPushReasonHelper.MissingReference;
         switch (row)
         {
@@ -472,8 +493,14 @@ public sealed partial class PushHandler(
         return owner is null ? SyncPushReasonHelper.MissingReference : owner == articleId ? null : SyncPushReasonHelper.Invalid;
     }
 
-    private async Task<bool> ExistsAsync<T>(Guid? id, CancellationToken ct) where T : class =>
-        id is not { } value || await db.Set<T>().AnyAsync(e => EF.Property<Guid>(e, "Id") == value, ct);
+    /// <summary>Null, already known to exist, or found (then remembered for the rest of the batch).</summary>
+    private async Task<bool> KnownOrExistsAsync<T>(Guid? id, BatchState state, CancellationToken ct) where T : class
+    {
+        if (id is not { } value || state.Known.Contains((typeof(T), value))) return true;
+        if (!await db.Set<T>().AnyAsync(e => EF.Property<Guid>(e, "Id") == value, ct)) return false;
+        state.Known.Add((typeof(T), value));
+        return true;
+    }
 
     /// <summary>Another row (soft-deleted ones too, like the unique index) matches.</summary>
     private Task<bool> TakenAsync<T>(Guid self, Expression<Func<T, bool>> match, CancellationToken ct) where T : class =>
