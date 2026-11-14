@@ -129,7 +129,9 @@ public sealed partial class ImageHandler(IOptions<ServerOptions> options, ILogge
     /// photo), if the photo was stored before <paramref name="olderThan"/> ago (a photo is uploaded before the push
     /// that references it). Call it in a transaction holding the sync lock (no push in flight can reference a photo
     /// unseen) and then <see cref="LockAsync"/> (no upload races the delete). Returns the deleted hashes: the caller
-    /// removes the files with <see cref="DeleteFile"/> after the commit, so a rollback never leaves a row without file.
+    /// removes the files with <see cref="DeleteFile"/> before the commit, while the image lock is still held (after
+    /// it, a waiting upload of the same photo could move its file in and lose it). A failed commit then leaves an
+    /// unreferenced row without file, which the next run removes.
     /// </summary>
     public static async Task<List<string>> DeleteOrphanRowsAsync(EasyStockDbContext db, TimeSpan olderThan, TimeProvider time, CancellationToken ct)
     {
@@ -143,19 +145,16 @@ public sealed partial class ImageHandler(IOptions<ServerOptions> options, ILogge
     }
 
     /// <summary>
-    /// <see cref="DeleteOrphanRowsAsync"/> in a transaction of its own, then the files. Returns how many were deleted.
+    /// <see cref="DeleteOrphanRowsAsync"/> and the files, in a transaction of its own. Returns how many were deleted.
     /// </summary>
     public async Task<int> DeleteOrphansAsync(EasyStockDbContext db, TimeSpan olderThan, TimeProvider time, CancellationToken ct)
     {
-        List<string> deleted;
-        await using (var tx = await db.Database.BeginTransactionAsync(ct))
-        {
-            await db.AcquireSyncLockAsync(ct);
-            await LockAsync(db, ct);
-            deleted = await DeleteOrphanRowsAsync(db, olderThan, time, ct);
-            await tx.CommitAsync(ct);
-        }
+        await using var tx = await db.Database.BeginTransactionAsync(ct);
+        await db.AcquireSyncLockAsync(ct);
+        await LockAsync(db, ct);
+        var deleted = await DeleteOrphanRowsAsync(db, olderThan, time, ct);
         foreach (var sha in deleted) DeleteFile(sha);
+        await tx.CommitAsync(ct);
         return deleted.Count;
     }
 

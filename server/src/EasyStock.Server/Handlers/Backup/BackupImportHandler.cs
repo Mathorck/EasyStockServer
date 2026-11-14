@@ -41,7 +41,8 @@ public sealed class BackupImportHandler(
         {
             foreach (var sha in pathToSha.Values.Distinct(StringComparer.Ordinal).ToList())
             {
-                if (await images.ExistsAsync(sha, ct)) continue;
+                // No "already stored" shortcut here: the orphan purge could delete the photo before the import takes
+                // its locks. StoreAsync skips a photo the server holds, under the locks.
                 var path = pathToSha.First(p => p.Value == sha).Key;
                 await using var photo = await archive.OpenPhotoAsync(path, ct);
                 if (photo is null) continue;

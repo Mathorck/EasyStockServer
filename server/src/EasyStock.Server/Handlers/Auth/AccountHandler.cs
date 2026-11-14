@@ -83,8 +83,8 @@ public sealed partial class AccountHandler(
     }
 
     /// <summary>
-    /// <c>POST /auth/logout</c>: ends the session. A Guest account is deleted with everything that cascades from it
-    /// (sessions, promotions).
+    /// <c>POST /auth/logout</c>: ends the session. A Guest account is soft-deleted (name removed, sessions revoked,
+    /// pending promotion cancelled); the row stays for its movements.
     /// </summary>
     public async Task LogoutAsync(Guid userId, Guid sessionId, CancellationToken ct)
     {

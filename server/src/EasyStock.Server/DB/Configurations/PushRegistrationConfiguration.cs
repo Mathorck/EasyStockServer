@@ -10,7 +10,7 @@ internal sealed class PushRegistrationConfiguration : IEntityTypeConfiguration<P
     {
         e.ToTable("push_registration");
         e.HasKey(x => x.DeviceSessionId);
-        // A session's endpoint goes with it (revoked sessions are kept, deleted Guests take theirs along).
+        // A session's endpoint goes with it (revoked sessions are kept until the cleanup job deletes them).
         e.HasOne<DeviceSession>().WithOne().HasForeignKey<PushRegistration>(x => x.DeviceSessionId).OnDelete(DeleteBehavior.Cascade);
         e.Property(x => x.Endpoint).IsRequired(); // text; the length limit is checked in PushController
     }
