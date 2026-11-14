@@ -40,13 +40,100 @@ public sealed class HardeningTests
         foreach (var slug in slugs) Assert.NotEqual("Error", ProblemTypesHelper.DefaultTitle(slug));
     }
 
+    private const string Sha256 = "ab:cd:ef:01:23:45:67:89:ab:cd:ef:01:23:45:67:89:ab:cd:ef:01:23:45:67:89:ab:cd:ef:01:23:45:67:89";
+
+    private static string QrLink(string publicUrl, string? fingerprint) =>
+        new QrContentHandler(Options.Create(new ServerOptions { PublicUrl = publicUrl, CertFingerprint = fingerprint }))
+            .Build(QrContentHandler.Setup, "t");
+
     [Fact]
-    public void Qr_fingerprint_is_escaped()
+    public void Qr_fingerprint_is_normalised_on_https() =>
+        Assert.EndsWith("&fp=" + Sha256.Replace(":", ""), QrLink("https://x", Sha256.ToUpperInvariant()));
+
+    [Fact]
+    public void Qr_has_no_fingerprint_on_http() =>
+        Assert.DoesNotContain("fp=", QrLink("http://192.168.1.10:8080", Sha256));
+
+    [Fact]
+    public void Qr_leaves_out_a_fingerprint_that_is_not_a_sha256() =>
+        Assert.DoesNotContain("fp=", QrLink("https://x", "AB:CD&token=evil#"));
+
+    [Theory]
+    [InlineData("https://stock.example.org")]
+    [InlineData("https://stock.example.org/easystock")]
+    [InlineData("http://192.168.1.10:8080")]
+    [InlineData("http://[fd00::1]:8080/")]
+    public void Public_url_the_app_accepts_passes_startup(string url) =>
+        Assert.True(new ServerOptionsValidator().Validate(null, Valid(publicUrl: url)).Succeeded);
+
+    [Theory]
+    [InlineData("https://user:pass@stock.example.org")]
+    [InlineData("https://stock.example.org/?a=b")]
+    [InlineData("https://stock.example.org/#top")]
+    [InlineData("HTTPS://stock.example.org")]
+    [InlineData("ftp://stock.example.org")]
+    [InlineData("https://stock_example.org")]
+    [InlineData("https://stock.example.org:080")]
+    [InlineData("https://stock.example.org:70000")]
+    [InlineData("https://.example.org")]
+    [InlineData("https://[fd00::1")]
+    public void Public_url_the_app_refuses_fails_startup(string url)
     {
-        var qr = new QrContentHandler(Options.Create(new ServerOptions { PublicUrl = "https://x", CertFingerprint = "AB:CD&token=evil#" }));
-        var link = qr.Build(QrContentHandler.Setup, "t");
-        Assert.EndsWith("&fp=abcd%26token%3Devil%23", link);
+        var result = new ServerOptionsValidator().Validate(null, Valid(publicUrl: url));
+        Assert.True(result.Failed);
+        Assert.Contains("EASYSTOCK_PUBLIC_URL", result.FailureMessage);
     }
+
+    [Theory]
+    [InlineData(Sha256)]
+    [InlineData("ABCDEF0123456789ABCDEF0123456789ABCDEF0123456789ABCDEF0123456789")]
+    public void Sha256_fingerprint_passes_startup(string fp) =>
+        Assert.True(new ServerOptionsValidator().Validate(null, Valid(fingerprint: fp)).Succeeded);
+
+    [Theory]
+    [InlineData("AB:CD")]
+    [InlineData("abc:def")]
+    [InlineData("zz" + "0123456789abcdef0123456789abcdef0123456789abcdef0123456789abcd")]
+    [InlineData("da39a3ee5e6b4b0d3255bfef95601890afd80709")] // SHA-1
+    public void Other_fingerprint_fails_startup(string fp)
+    {
+        var result = new ServerOptionsValidator().Validate(null, Valid(fingerprint: fp));
+        Assert.True(result.Failed);
+        Assert.Contains("EASYSTOCK_CERT_FINGERPRINT", result.FailureMessage);
+    }
+
+    [Theory]
+    [InlineData("2001:db8::/64")]
+    [InlineData("fd00:1:2:3::/112")]
+    [InlineData("::ffff:10.0.0.0/104")]
+    [InlineData("10.0.0.0/8")]
+    [InlineData("2001:db8::1")]
+    public void Narrow_trusted_proxy_passes_startup(string entry) =>
+        Assert.True(new ServerOptionsValidator().Validate(null, Valid(proxies: [entry])).Succeeded);
+
+    [Theory]
+    [InlineData("2001:db8::/32")]
+    [InlineData("2001:db8::/48")]
+    [InlineData("fd00::/63")]
+    [InlineData("::/64")]
+    [InlineData("::ffff:0:0/96")]
+    [InlineData("::ffff:0.0.0.0/100")]
+    [InlineData("10.0.0.0/7")]
+    public void Wide_trusted_proxy_fails_startup(string entry)
+    {
+        var result = new ServerOptionsValidator().Validate(null, Valid(proxies: [entry]));
+        Assert.True(result.Failed);
+        Assert.Contains("too broad", result.FailureMessage);
+    }
+
+    private static ServerOptions Valid(string publicUrl = "https://stock.example.org", string? fingerprint = null,
+        IReadOnlyList<string>? proxies = null) => new()
+    {
+        Db = "Host=localhost;Database=x",
+        PublicUrl = publicUrl,
+        CertFingerprint = fingerprint,
+        TrustedProxies = proxies ?? [],
+    };
 
     private static SigningKeyHandler Handler(string dir) =>
         new(Options.Create(new ServerOptions { DataDir = dir }), NullLogger<SigningKeyHandler>.Instance);
