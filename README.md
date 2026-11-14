@@ -36,7 +36,7 @@ This server is an **optional** add-on. It lets several phones share one stock, w
 - **Roles**: `admin`, `member`, `viewer` and `guest`, with the same rights as the app, checked on every request.
 - **Movement history**: stock movements are append-only and keep who made them, so you know who took the axe (a backup import drops the authors).
 - **First change wins**: when two phones edit the same thing, the first change is kept and the second phone is told, with a choice to keep theirs or re-apply its own.
-- **Accounts**: users change their password and display name; Admins rename, disable and manage users and their devices.
+- **Accounts**: users change their password and display name, download their personal data, and delete their own account; Admins rename, disable and manage users and their devices.
 - **Low-stock alerts**: recorded when an article goes below its threshold, and synced to the phones. Push notifications through [UnifiedPush](https://unifiedpush.org) are not implemented yet: phones can register an endpoint, but the server does not send anything to it.
 - **Invites and Guest QR code**: add users with a single-use invite, or let people join as Guests with a printed QR code.
 - **Photos and backups**: photos stored on the server, backup export and import by an Admin.
@@ -151,6 +151,8 @@ Built to store as little personal data as possible, in line with the Swiss nFADP
 - **Not stored**: no email address, no phone number, no IP address in the database.
 - **Logs** never contain passwords, tokens, display names or row content, only user IDs (the setup token is the single exception, see [First start](#first-start)).
 - **Movement authors are kept**: the history shows who made each movement. Disabling or deleting a user never removes their movements. A backup import is the exception: backups carry no authors, so imported movements have none.
+- **Right of access and portability**: every user, Guests included, can download their personal data as a JSON file from the app (`GET /api/v1/me/data`): account, devices, sessions, push registrations (host only) and the movements they made. No password hash, token or other user's data.
+- **Account deletion**: users can delete their own account from the app (`DELETE /api/v1/me`, with their password; Guests need none). The last Admin cannot. Deleting, by the user or an Admin, erases the username (free again), display name, password, alert preference, last seen, device names, sessions and push registrations. The row stays as "Deleted user" so the movements keep their author ID.
 - **Inactive Guests are deleted**: a Guest account not seen for 90 days is deleted (its name is removed, its movements stay) with its sessions.
 - **You are the data controller.** Whoever hosts a server is responsible for the data on it: informing users, handling their requests, securing the host and the backups.
 

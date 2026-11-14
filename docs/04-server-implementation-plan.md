@@ -657,7 +657,7 @@ Also update `docs/03-server-spec.md` with the decisions from 1.2 so the spec sta
 | type | status | when |
 |---|---|---|
 | `validation-failed` | 400 | bad body or query; `errors` map |
-| `invalid-credentials` | 401 | wrong username or password, wrong current password |
+| `invalid-credentials` | 401 | wrong username or password; 400 for a wrong current password (`POST /me/password`, `DELETE /me`) |
 | `account-locked` | 401 | reserved; no longer sent (a locked login answers `invalid-credentials`) |
 | `account-disabled` | 401 | disabled or deleted |
 | `unauthorized` | 401 | missing or invalid token |
@@ -670,7 +670,7 @@ Also update `docs/03-server-spec.md` with the decisions from 1.2 so the spec sta
 | `no-promotion` | 404 | complete-promotion without a pending one |
 | `setup-done` | 409 | setup after done |
 | `username-taken` | 409 | |
-| `last-admin` | 409 | |
+| `last-admin` | 409 | demoting, disabling or deleting the last active Admin (`PATCH`/`DELETE /admin/users/{id}`, `DELETE /me`) |
 | `role-not-allowed` | 409 | full to Guest, invalid target role |
 | `use-promotion` | 409 | role change on a Guest via PATCH |
 | `guest-limit-reached` | 409 | |

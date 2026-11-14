@@ -121,7 +121,8 @@ What the optional EasyStock server is, how it is built, and how it behaves. The 
 
 ### Rate limits
 
-* Login, setup, invite redeem, reset, promotion and password change endpoints: 10 requests per minute per IP address.
+* Login, setup, invite redeem, reset, promotion, password change and `DELETE /me` endpoints: 10 requests per minute per IP address.
+* Personal data export (`GET /me/data`): 5 requests per hour per user, on top of the default.
 * Guest signup: 5 accounts per hour per IP address, and the Guest limit set by the Admin.
 * Other endpoints: 120 requests per minute per device session.
 
@@ -184,6 +185,28 @@ Token answer:
 * `GET /me` returns the user, role, kind, short code, and the pending promotion (target role and expiry) if there is one.
 * `PATCH /me` lets the user change their display name and their alert preference.
 * `POST /me/password` lets a full account change its password with the current one.
+* `DELETE /me` deletes the caller's own account. Body `{ "password": "<current password>" }`. An account with a password must send it: a wrong or missing one is 400 `invalid-credentials` and counts toward the lockout (429 `rate-limited` with `retryAfter` while locked), as on `POST /me/password`. An account without a password (a Guest) needs no body. The last active Admin gets 409 `last-admin`. On success 204, with the same erasure as `DELETE /admin/users/{id}` (see "Personal data").
+* `GET /me/data` returns the caller's personal data as a JSON file (every role, Guests included), with `Content-Disposition: attachment; filename="easystock-my-data-<yyyy-MM-dd>.json"`. 5 requests per hour per user.
+
+Personal data export (`formatVersion` 1; times are ISO 8601 UTC; movements are streamed, oldest first):
+
+```json
+{
+  "formatVersion": 1,
+  "exportedAt": "2026-11-14T10:00:00Z",
+  "server": { "publicUrl": "https://stock.example.org" },
+  "account": { "id": "…", "username": "jean", "displayName": "Jean", "role": "member", "kind": "full", "shortCode": "K7-4QX",
+               "createdAt": "…", "lastSeenAt": "…", "alertsEnabled": null, "disabled": false },
+  "devices": [ { "id": "…", "name": "Pixel", "createdAt": "…", "lastSeenAt": "…" } ],
+  "sessions": [ { "deviceId": "…", "createdAt": "…", "lastUsedAt": "…", "expiresAt": "…", "revokedAt": null, "revokeReason": null } ],
+  "pushRegistrations": [ { "deviceId": "…", "endpointHost": "ntfy.example.org", "createdAt": "…", "updatedAt": "…" } ],
+  "movements": [ { "id": "…", "occurredAt": "…", "createdAt": "…", "articleId": "…", "articleName": "Screws", "itemId": null,
+                   "locationId": "…", "locationName": "Shelf A", "quantity": -2000, "reason": "consumption", "comment": null, "deviceId": "…" } ]
+}
+```
+
+* A device is a device session, so `devices` and `sessions` describe the same rows; `expiresAt` is null once revoked. `username` is null for a Guest. `quantity` is in thousandths, as stored.
+* Never in the export: password hashes, security stamps, tokens or token hashes, the full push endpoint URL (it holds a secret), or any other user's data.
 
 ### Sync
 
@@ -266,7 +289,7 @@ Pull answer:
 
 * `GET /admin/users` lists users with role, kind, last seen, devices and pending promotion.
 * `PATCH /admin/users/{id}` changes role, display name, or disables or enables the user.
-* `DELETE /admin/users/{id}` deletes a user; their movements keep the user ID, and the display name becomes "Deleted user".
+* `DELETE /admin/users/{id}` deletes a user; their movements keep the user ID, and the display name becomes "Deleted user". The personal data is erased as for `DELETE /me` (see "Personal data"). The last active Admin gets 409 `last-admin`.
 * `POST /admin/users/{id}/reset` creates a single-use reset token (valid 24 hours) and returns the `reset` QR content.
 * `POST /admin/users/{id}/promote` takes the target role and the short code typed by the Admin, and creates a pending promotion.
 * `DELETE /admin/users/{id}/promote` cancels a pending promotion.
@@ -363,6 +386,13 @@ Pull answer:
 * Logs never contain passwords, tokens, display names or row content; they contain user IDs only.
 * A movement always keeps who made it. There is no retention setting.
 * Deleting a user keeps their movements (stock needs them) but drops the link to a name.
+* Users can download their data (`GET /me/data`, right of access and portability): account, devices, sessions, push registrations (endpoint host only) and the movements they made, as JSON. Never password hashes, tokens or other users' data.
+* Users can delete their own account (`DELETE /me`, with their password; Guests need none); the last active Admin cannot. It erases, like an Admin delete, a Guest logout and the 90-day Guest cleanup:
+  * the username (set to null, so it can be taken again), the display name (replaced by "Deleted user"), the password hash, the alert preference, last seen and the lockout state;
+  * the device names of all the user's sessions (replaced by "Deleted device"); every session is revoked and its push registration deleted;
+  * every password reset of the user, and a pending promotion is cancelled; the in-memory failed-password counters are cleared.
+* The `users` row is soft-deleted (`deleted_at`) and stays, so the phones pull "Deleted user" and the movements keep the user ID. `stock_movement` and `low_stock_alert` rows are never touched. Invites, resets and promotions the user created for others keep only the creator's ID, like movements.
+* The deletion logs the user ID only.
 * The README explains to self-hosters that they are the data controller for their server.
 
 ## Docker
