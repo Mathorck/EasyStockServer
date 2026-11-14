@@ -10,7 +10,8 @@ namespace EasyStock.Server.Interfaces;
 public interface IPullUserDirectoryHandler
 {
     /// <summary>
-    /// Users with <c>server_seq &gt; since</c>, in <c>server_seq</c> order, at most <paramref name="take"/>.
+    /// Users with <c>server_seq &gt; since</c> who authored at least one movement, in <c>server_seq</c> order, at most
+    /// <paramref name="take"/>. Users no movement names are never sent (privacy).
     /// They take part in the page cut like the shared tables. A deleted user carries its "Deleted user" name.
     /// </summary>
     Task<IReadOnlyList<PullUserChange>> ChangedSinceAsync(long since, int take, CancellationToken ct);

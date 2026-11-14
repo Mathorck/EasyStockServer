@@ -321,6 +321,7 @@ Pull answer:
 * Rows are read in `server_seq` order and grouped by table.
 * Soft-deleted rows are included, so phones learn about deletions.
 * Display names of the users referenced by the returned movements are added in `users`.
+* A rename or deletion of a user who authored movements is sent too, in the page where the user row changed, so phones that already hold those movements update the name. A user no movement names (a Guest, a user who never moved stock) is never sent.
 * New `low_stock_alert` rows for this user are added in `alerts`.
 * For a Guest: movements are sent without `created_by`, `device_id` and `comment`; `stock_review` and `stock_review_line` are left out; `users` and `alerts` are empty.
 * The Guest filter is applied in one place, the pull builder, and covered by tests.

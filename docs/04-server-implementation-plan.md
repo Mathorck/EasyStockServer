@@ -99,7 +99,7 @@ The plan was built from `docs/03-server-spec.md` alone. It has five parts: groun
     - Uploaded-but-never-used images are covered the same way.
 11. **User display-name propagation.** Pull only sends names for users referenced by the movements it returns, so renames and "Deleted user" never reach phones that already have the name.
     - **Decision:** `users` gets a `server_seq`. A trigger bumps it only when `display_name` or the deleted state changes.
-    - Pull returns, in `users`, every user whose seq is in the window plus the authors of returned movements.
+    - Pull returns, in `users`, every movement author whose seq is in the window plus the authors of returned movements. Users no movement names (Guests, users who never moved stock) are never sent (privacy).
 12. **Alert preference.** `PATCH /me` changes it, but `users` has no column for it.
     - **Decision:** `users.alerts_enabled bool null`, where null means the role default (admin/member on, viewer off, guest always off).
     - "Alert recipients set by an Admin" in Configuration conflicts with this. **Decision:** no global recipient setting; per-user preference only. Flag for confirmation.

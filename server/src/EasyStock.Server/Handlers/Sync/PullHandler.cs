@@ -19,7 +19,8 @@ namespace EasyStock.Server.Handlers.Sync;
 /// server_seq LIMIT limit + 1</c>.</item>
 /// <item>Merge by seq in memory and keep the first <c>limit</c>; <c>next</c> is the seq of the last kept row
 /// (<c>since</c> if none), <c>hasMore</c> whether more remained.</item>
-/// <item>After the cut: alerts filtered per caller, users of the window plus authors of the kept movements, then
+/// <item>After the cut: alerts filtered per caller, movement authors changed in the window plus authors of the kept
+/// movements (never a user no movement names), then
 /// <see cref="PullGuestFilterHelper"/>.</item>
 /// </list>
 /// </summary>
@@ -121,7 +122,7 @@ public sealed partial class PullHandler(
         }
     }
 
-    /// <summary>Users changed in the window, plus the authors of the kept movements (same snapshot).</summary>
+    /// <summary>Movement authors changed in the window, plus the authors of the kept movements (same snapshot).</summary>
     private async Task<List<SyncPullUser>> UsersAsync(List<Candidate> kept, CancellationToken ct)
     {
         var byId = new Dictionary<Guid, string>();

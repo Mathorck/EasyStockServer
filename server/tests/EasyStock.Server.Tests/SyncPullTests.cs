@@ -600,13 +600,48 @@ public sealed class SyncPullTests(PostgresFixture pg) : IAsyncLifetime
     [Fact]
     public async Task Users_come_from_the_users_table_and_a_deleted_user_is_named_Deleted_user()
     {
-        var since = await Cursor();
         var kept = await _factory.SignInAsync(Role.Member);
         var deleted = await _factory.SignInAsync(Role.Member);
+        var f = NewFixture();
+        // Movements from before the window: the phone already holds them, and must learn the rename and the deletion.
+        await Insert(f.Category, f.Location, f.Article, Movement(f, 1000, kept.UserId), Movement(f, 1000, deleted.UserId));
+        var since = await Cursor();
+        await WithDb(db => db.Users.Where(u => u.Id == kept.UserId)
+            .ExecuteUpdateAsync(u => u.SetProperty(x => x.DisplayName, "Renamed user"), Ct));
         await WithDb(db => db.Users.Where(u => u.Id == deleted.UserId)
             .ExecuteUpdateAsync(u => u.SetProperty(x => x.DeletedAt, DateTimeOffset.UnixEpoch), Ct));
 
-        var client = await ClientAs(Role.Viewer);
+        var users = await PullUsers(await ClientAs(Role.Viewer), since);
+        Assert.Equal("Renamed user", users[kept.UserId.ToString()]);
+        Assert.Equal("Deleted user", users[deleted.UserId.ToString()]);
+
+        // Guests get no names.
+        using var guestDoc = await Pull(await ClientAs(Role.Guest), since, 2000);
+        Assert.Empty(guestDoc.RootElement.GetProperty("users").EnumerateArray());
+    }
+
+    [Fact]
+    public async Task Users_no_movement_names_are_never_sent()
+    {
+        var since = await Cursor();
+        // Changed in the window (signed up, then renamed) but never moved stock: a Guest and a Member.
+        var guest = await _factory.SignInAsync(Role.Guest);
+        var silent = await _factory.SignInAsync(Role.Member);
+        await WithDb(db => db.Users.Where(u => u.Id == silent.UserId)
+            .ExecuteUpdateAsync(u => u.SetProperty(x => x.DisplayName, "Silent member"), Ct));
+        var author = await _factory.SignInAsync(Role.Member);
+        var f = NewFixture();
+        await Insert(f.Category, f.Location, f.Article, Movement(f, 1000, author.UserId));
+
+        var users = await PullUsers(await ClientAs(Role.Admin), since);
+        Assert.Equal("Test user", users[author.UserId.ToString()]);
+        Assert.DoesNotContain(guest.UserId.ToString(), users.Keys);
+        Assert.DoesNotContain(silent.UserId.ToString(), users.Keys);
+    }
+
+    /// <summary>Every <c>users</c> entry of the pages from <paramref name="since"/> to the end, by id.</summary>
+    private static async Task<Dictionary<string, string>> PullUsers(HttpClient client, long since)
+    {
         var users = new Dictionary<string, string>();
         for (var cursor = since; ;)
         {
@@ -618,12 +653,7 @@ public sealed class SyncPullTests(PostgresFixture pg) : IAsyncLifetime
             Assert.True(next > cursor, "the cursor advances while there is more");
             cursor = next;
         }
-        Assert.Equal("Test user", users[kept.UserId.ToString()]);
-        Assert.Equal("Deleted user", users[deleted.UserId.ToString()]);
-
-        // Guests get no names.
-        using var guestDoc = await Pull(await ClientAs(Role.Guest), since, 2000);
-        Assert.Empty(guestDoc.RootElement.GetProperty("users").EnumerateArray());
+        return users;
     }
 
     // ---- consistency ----
