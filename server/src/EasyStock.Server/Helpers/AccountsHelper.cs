@@ -78,6 +78,22 @@ public static class AccountsHelper
             extensions: new Dictionary<string, object?> { ["errors"] = errors });
     }
 
+    /// <summary>
+    /// Soft-deletes a Guest (logout, or the cleanup job after 90 days unseen) and cancels its pending promotion. The
+    /// row stays, like an Admin deleting a full account: a hard delete would leave no <c>users.server_seq</c> bump, so
+    /// other phones would keep the Guest's name for ever, and movements point at it. The trigger bumps the seq when
+    /// <c>deleted_at</c> changes, and phones pull "Deleted user". The caller handles the sessions and the transaction.
+    /// </summary>
+    public static async Task SoftDeleteGuestAsync(EasyStockDbContext db, AppUser user, DateTimeOffset now, CancellationToken ct)
+    {
+        user.DeletedAt = now;
+        user.DisplayName = Handlers.Admin.AdminUsersHandler.DeletedDisplayName;
+        user.SecurityStamp = Guid.NewGuid().ToString("N");
+        await db.SaveChangesAsync(ct);
+        await db.Promotions.Where(p => p.UserId == user.Id && p.EndedAt == null)
+            .ExecuteUpdateAsync(s => s.SetProperty(x => x.EndedAt, now).SetProperty(x => x.EndReason, Promotion.Cancelled), ct);
+    }
+
     public static Task LockAsync(this EasyStockDbContext db, long key, CancellationToken ct) =>
         db.Database.ExecuteSqlAsync($"SELECT pg_advisory_xact_lock({key})", ct);
 

@@ -109,13 +109,8 @@ public sealed partial class AccountHandler(
         var now = time.GetUtcNow();
         await using var tx = await db.Database.BeginTransactionAsync(ct);
         var user = await db.Users.SingleAsync(u => u.Id == userId, ct);
-        user.DeletedAt = now;
-        user.DisplayName = AdminUsersHandler.DeletedDisplayName;
-        user.SecurityStamp = Guid.NewGuid().ToString("N");
-        await db.SaveChangesAsync(ct);
+        await AccountsHelper.SoftDeleteGuestAsync(db, user, now, ct);
         await sessions.RevokeAllAsync(userId, AuthLimitsHelper.RevokeReasons.Deleted, keep: null, ct);
-        await db.Promotions.Where(p => p.UserId == userId && p.EndedAt == null)
-            .ExecuteUpdateAsync(s => s.SetProperty(x => x.EndedAt, now).SetProperty(x => x.EndReason, Promotion.Cancelled), ct);
         await tx.CommitAsync(ct);
     }
 

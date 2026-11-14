@@ -38,7 +38,8 @@ public sealed partial class CleanupService(
             await using var scope = scopes.CreateAsyncScope();
             var counts = await scope.ServiceProvider.GetRequiredService<CleanupHandler>().RunOnceAsync(ct);
             if (counts is null) LogSkipped(log);
-            else LogDone(log, counts.PromotionsExpired, counts.Invites, counts.PasswordResets, counts.Promotions, counts.Sessions);
+            else LogDone(log, counts.PromotionsExpired, counts.Invites, counts.PasswordResets, counts.Promotions, counts.Sessions,
+                counts.Guests, counts.SyncBatches, counts.Images);
         }
         catch (Exception e) when (e is not OperationCanceledException)
         {
@@ -47,8 +48,9 @@ public sealed partial class CleanupService(
     }
 
     [LoggerMessage(Level = LogLevel.Information,
-        Message = "Cleanup: {PromotionsExpired} promotions expired, deleted {Invites} invites, {PasswordResets} resets, {Promotions} promotions, {Sessions} sessions")]
-    private static partial void LogDone(ILogger log, int promotionsExpired, int invites, int passwordResets, int promotions, int sessions);
+        Message = "Cleanup: {PromotionsExpired} promotions expired, deleted {Invites} invites, {PasswordResets} resets, {Promotions} promotions, {Sessions} sessions, {Guests} inactive Guests, {SyncBatches} sync batches, {Images} orphan photos")]
+    private static partial void LogDone(ILogger log, int promotionsExpired, int invites, int passwordResets, int promotions, int sessions,
+        int guests, int syncBatches, int images);
 
     [LoggerMessage(Level = LogLevel.Debug, Message = "Cleanup skipped: another instance is running it")]
     private static partial void LogSkipped(ILogger log);
