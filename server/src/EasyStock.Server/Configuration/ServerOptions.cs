@@ -79,8 +79,9 @@ public sealed class ServerOptionsValidator : IValidateOptions<ServerOptions>
                     errors.Add($"EASYSTOCK_TRUSTED_PROXIES entry '{p}' is not an IP address or CIDR range.");
                 else if (network.PrefixLength < MinPrefixLength(network))
                     errors.Add($"EASYSTOCK_TRUSTED_PROXIES entry '{p}' is too broad: it would trust forwarded headers from a large part of the network " +
-                        $"(the smallest prefix allowed here is /{MinPrefixLength(network)}: /{MinIPv4Prefix} for IPv4, /{MinIPv6Prefix} for IPv6, " +
-                        $"/{96 + MinIPv4Prefix} for IPv4-mapped IPv6 ::ffff:0:0/96). List your proxy address or its subnet.");
+                        $"(the smallest prefix allowed here is /{MinPrefixLength(network)}: /{MinIPv4Prefix} for IPv4, /{MinLocalIPv6Prefix} for private " +
+                        $"(fc00::/7) or link-local (fe80::/10) IPv6, /{MinIPv6Prefix} for other IPv6, /{96 + MinIPv4Prefix} for IPv4-mapped IPv6 " +
+                        "::ffff:0:0/96). List your proxy address or its subnet.");
             }
             else if (!IPAddress.TryParse(p, out var address))
             {
@@ -96,12 +97,16 @@ public sealed class ServerOptionsValidator : IValidateOptions<ServerOptions>
 
     public const int MinIPv4Prefix = 8;
     public const int MinIPv6Prefix = 64;
+    public const int MinLocalIPv6Prefix = 32;
 
     private static readonly System.Net.IPNetwork IPv4Mapped = System.Net.IPNetwork.Parse("::ffff:0:0/96");
+    private static readonly System.Net.IPNetwork[] LocalIPv6 =
+        [System.Net.IPNetwork.Parse("fc00::/7"), System.Net.IPNetwork.Parse("fe80::/10")];
 
     // A /0 (or a wide range) would make every client a trusted proxy, so X-Forwarded-For could be forged
     // to dodge the rate limits. /8 still covers the usual private ranges (10.0.0.0/8, 172.16.0.0/12); an IPv6
-    // subnet is a /64 (a Docker or LAN segment). An IPv6 range overlapping ::ffff:0:0/96 (IPv4 clients as a
+    // global subnet is a /64 (a LAN segment); a range inside the private (ULA) or link-local space only reaches the
+    // local network, so a /32 stays allowed (Docker ULA pools). An IPv6 range overlapping ::ffff:0:0/96 (IPv4 clients as a
     // dual-stack socket shows them) is held to the IPv4 rule, else ::/64 would trust the whole IPv4 internet.
     private static int MinPrefixLength(System.Net.IPNetwork network)
     {
@@ -109,7 +114,9 @@ public sealed class ServerOptionsValidator : IValidateOptions<ServerOptions>
         // Two ranges overlap when they agree on the shorter prefix. Compared by bytes: IPNetwork.Contains has its
         // own handling of IPv4-mapped addresses.
         var overlapsMapped = SamePrefix(network.BaseAddress, IPv4Mapped.BaseAddress, Math.Min(network.PrefixLength, IPv4Mapped.PrefixLength));
-        return overlapsMapped ? 96 + MinIPv4Prefix : MinIPv6Prefix;
+        if (overlapsMapped) return 96 + MinIPv4Prefix;
+        var local = LocalIPv6.Any(l => network.PrefixLength >= l.PrefixLength && SamePrefix(network.BaseAddress, l.BaseAddress, l.PrefixLength));
+        return local ? MinLocalIPv6Prefix : MinIPv6Prefix;
     }
 
     private static bool SamePrefix(IPAddress a, IPAddress b, int bits)

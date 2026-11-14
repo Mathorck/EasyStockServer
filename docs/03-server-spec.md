@@ -46,7 +46,7 @@ What the optional EasyStock server is, how it is built, and how it behaves. The 
 * `EASYSTOCK_PUBLIC_URL`: the address phones use, written into QR codes (required). Checked at startup with the app's rules: lower-case `http://` or `https://`, a host, an optional port and path, no user info, query or fragment.
 * `EASYSTOCK_DATA_DIR`: folder for photos, the signing key and data-protection keys (default `/data`).
 * `EASYSTOCK_CERT_FINGERPRINT`: SHA-256 of a self-signed certificate, written into QR codes (optional). 64 hex characters, `:` separators allowed; anything else fails startup. Only written for an `https://` public URL (the app refuses `fp` on http); with http it is ignored with a warning.
-* `EASYSTOCK_TRUSTED_PROXIES`: comma-separated IPs or CIDR ranges whose `X-Forwarded-For` is believed. Ranges wider than /8 (IPv4) or /64 (IPv6), or than /104 inside `::ffff:0:0/96`, fail startup.
+* `EASYSTOCK_TRUSTED_PROXIES`: comma-separated IPs or CIDR ranges whose `X-Forwarded-For` is believed. Ranges wider than /8 (IPv4), /32 (private `fc00::/7` or link-local `fe80::/10` IPv6), /64 (other IPv6), or /104 inside `::ffff:0:0/96`, fail startup.
 * `EASYSTOCK_LOG_LEVEL`: log level (default `Information`).
 * Everything else (the server name) is set by an Admin in the app and stored in the database.
 
