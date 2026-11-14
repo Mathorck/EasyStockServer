@@ -144,8 +144,9 @@ What the optional EasyStock server is, how it is built, and how it behaves. The 
 * The schema version is the app's Room DB version. The server accepts the versions whose shared tables it matches (`docs/schema.dbml` in the app repo): currently 10 and 11 (11 only adds an app-only table). A drift test checks that the app's `DB_VERSION` is among them.
 * Backups: an import accepts `schema_version` up to the highest supported version (11) and refuses a newer one as `backup-newer-version`. An export writes the lowest supported version (10), so every supported app can read it.
 * An app below the minimum version, or with an unsupported schema version, gets 426 with type `app-too-old`.
-* The OpenAPI description is served at `/openapi/v1.json`.
+* The OpenAPI description is served at `/openapi/v1.json` only in Development or when `EASYSTOCK_OPENAPI=true`. It is always written to `server/openapi/v1.json` at build time.
 * `GET /health` answers 200 when the database is reachable, for Docker health checks.
+* `/health` and `/openapi` are rate-limited to 30 requests per minute per IP.
 
 ## Endpoints
 

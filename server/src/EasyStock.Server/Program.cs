@@ -71,7 +71,10 @@ public sealed class Program
         app.UseAuthentication();
         app.UseRateLimiter();
         app.UseAuthorization();
-        app.MapOpenApi("/openapi/{documentName}.json");
+        // The API description is only served in Development or when EASYSTOCK_OPENAPI=true: it maps every route
+        // for anyone who asks. The build-time generator reads the document from the services, not this route.
+        if (IsOpenApiGenerator || ServerOptions.OpenApiEnabled(app.Configuration, app.Environment))
+            app.MapOpenApi("/openapi/{documentName}.json");
         app.MapHealthChecks("/health");
         app.MapControllers();
 

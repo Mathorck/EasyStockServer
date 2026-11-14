@@ -12,11 +12,14 @@ namespace EasyStock.Server.Configuration;
 /// Rate limits (docs/03-server-spec.md, "Rate limits"): <see cref="AuthIp"/> (10 per minute per IP) on login,
 /// setup, invite redeem, Guest signup, reset, complete-promotion and
 /// <c>POST /me/password</c>; every other /api call 120 per minute per
-/// device session, or per IP without a valid token. Rejections are 429 <c>rate-limited</c> with Retry-After.
+/// device session, or per IP without a valid token; <c>/health</c> and <c>/openapi</c> 30 per minute per IP. Rejections are 429 <c>rate-limited</c> with Retry-After.
 /// </summary>
 public static class RateLimiting
 {
     public const string AuthIp = "auth-ip";
+
+    /// <summary>Requests per minute per IP on <c>/health</c> and <c>/openapi</c>.</summary>
+    public const int PublicPerMinute = 30;
 
     public static IServiceCollection AddEasyStockRateLimiting(this IServiceCollection services) =>
         services.AddRateLimiter(o =>
@@ -40,6 +43,9 @@ public static class RateLimiting
             // The default: a global limiter, so controllers added later are covered without any attribute.
             o.GlobalLimiter = PartitionedRateLimiter.Create<HttpContext, string>(ctx =>
             {
+                // Public, unauthenticated routes outside /api: per IP, well above the Docker health probe (2 a minute).
+                if (ctx.Request.Path.StartsWithSegments("/health") || ctx.Request.Path.StartsWithSegments("/openapi"))
+                    return RateLimitPartition.GetFixedWindowLimiter("public:" + ClientIp.Key(ctx), _ => PerMinute(PublicPerMinute));
                 if (!ctx.Request.Path.StartsWithSegments("/api")
                     || ctx.GetEndpoint()?.Metadata.GetMetadata<EnableRateLimitingAttribute>()?.PolicyName == AuthIp)
                     return RateLimitPartition.GetNoLimiter("none");

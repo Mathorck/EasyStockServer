@@ -40,6 +40,12 @@ public sealed class ServerOptions
             : DefaultCleanupIntervalMinutes,
     };
 
+    /// <summary>
+    /// Whether <c>/openapi/v1.json</c> is served: EASYSTOCK_OPENAPI (true/false) when set, else only in Development.
+    /// </summary>
+    public static bool OpenApiEnabled(IConfiguration c, IHostEnvironment env) =>
+        bool.TryParse(NonEmpty(c["EASYSTOCK_OPENAPI"]), out var on) ? on : env.IsDevelopment();
+
     private static string? NonEmpty(string? s) => string.IsNullOrWhiteSpace(s) ? null : s.Trim();
 }
 

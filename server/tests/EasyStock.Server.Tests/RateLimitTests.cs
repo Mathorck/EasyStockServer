@@ -90,4 +90,31 @@ public sealed class RateLimitTests(PostgresFixture pg)
         // Another forwarded client behind the same proxy has its own budget.
         Assert.Equal(HttpStatusCode.Unauthorized, (await Login(Forwarded(factory, "10.250.3.1", ApiFactory.RandomIp()))).StatusCode);
     }
+
+    [Theory]
+    [InlineData("/health")]
+    [InlineData("/openapi/v1.json")]
+    public async Task Public_routes_allow_30_requests_per_minute_per_ip(string path)
+    {
+        using var factory = new ApiFactory(pg.ConnectionString);
+        var client = factory.CreateVersionedClient();
+        for (var i = 0; i < 30; i++)
+            Assert.Equal(HttpStatusCode.OK, (await client.GetAsync(path, Ct)).StatusCode);
+        await (await client.GetAsync(path, Ct)).Problem(HttpStatusCode.TooManyRequests, "rate-limited");
+
+        // Another address has its own budget.
+        Assert.Equal(HttpStatusCode.OK, (await factory.CreateVersionedClient().GetAsync(path, Ct)).StatusCode);
+    }
+
+    [Theory]
+    [InlineData("Production", null, HttpStatusCode.NotFound)]
+    [InlineData("Production", "true", HttpStatusCode.OK)]
+    [InlineData("Development", "false", HttpStatusCode.NotFound)]
+    public async Task OpenApi_is_served_in_development_or_when_enabled(string environment, string? setting, HttpStatusCode expected)
+    {
+        var settings = new Dictionary<string, string> { ["environment"] = environment };
+        if (setting is not null) settings["EASYSTOCK_OPENAPI"] = setting;
+        using var factory = new ApiFactory(pg.ConnectionString, settings: settings);
+        Assert.Equal(expected, (await factory.CreateVersionedClient().GetAsync("/openapi/v1.json", Ct)).StatusCode);
+    }
 }
