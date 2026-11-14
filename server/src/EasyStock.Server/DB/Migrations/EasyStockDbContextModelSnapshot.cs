@@ -1032,6 +1032,9 @@ namespace EasyStock.Server.DB.Migrations
                     b.HasIndex("CreatedAt")
                         .HasDatabaseName("ix_stock_movement_created_at");
 
+                    b.HasIndex("CreatedBy")
+                        .HasDatabaseName("ix_stock_movement_created_by");
+
                     b.HasIndex("ItemId")
                         .HasDatabaseName("ix_stock_movement_item_id");
 

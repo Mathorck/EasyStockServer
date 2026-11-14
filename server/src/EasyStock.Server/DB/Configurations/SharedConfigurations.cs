@@ -136,6 +136,8 @@ internal sealed class StockMovementConfiguration : IEntityTypeConfiguration<Stoc
         e.HasIndex(x => new { x.ArticleId, x.LocationId });
         e.HasIndex(x => x.ItemId);
         e.HasIndex(x => x.CreatedAt);
+        // Pull names only users some movement names (PullUserDirectoryHandler).
+        e.HasIndex(x => x.CreatedBy);
         e.ServerSeq();
     }
 }

@@ -110,7 +110,7 @@ public sealed partial class SchemaDriftTests(PostgresFixture pg)
             problems.Add($"extra table {extra} (neither in schema.dbml nor in ServerOnlyTables)");
 
         // Indexes: every dbml index must exist with the same columns and uniqueness. Extra plain indexes are
-        // fine (foreign keys, server_seq), an extra unique index is not: it would reject rows the app accepts.
+        // fine (foreign keys, server_seq, lower() lookups, kept as their definition), an extra unique index is not: it would reject rows the app accepts.
         var dbIndexes = await ReadIndexes(pg.ConnectionString, ct);
         foreach (var (table, indexes) in ParseIndexes(dbml))
         {
@@ -162,9 +162,11 @@ public sealed partial class SchemaDriftTests(PostgresFixture pg)
         await conn.OpenAsync(ct);
         await using var cmd = new NpgsqlCommand("""
             SELECT t.relname, ix.indisunique,
-                   (SELECT string_agg(a.attname, ',' ORDER BY k.ord)
-                    FROM unnest(ix.indkey::int2[]) WITH ORDINALITY k(attnum, ord)
-                    JOIN pg_attribute a ON a.attrelid = t.oid AND a.attnum = k.attnum)
+                   CASE WHEN ix.indexprs IS NULL THEN
+                       (SELECT string_agg(a.attname, ',' ORDER BY k.ord)
+                        FROM unnest(ix.indkey::int2[]) WITH ORDINALITY k(attnum, ord)
+                        JOIN pg_attribute a ON a.attrelid = t.oid AND a.attnum = k.attnum)
+                   ELSE pg_get_indexdef(ix.indexrelid) END
             FROM pg_index ix JOIN pg_class t ON t.oid = ix.indrelid JOIN pg_namespace n ON n.oid = t.relnamespace
             WHERE n.nspname = 'public' AND NOT ix.indisprimary
             """, conn);
