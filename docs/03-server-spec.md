@@ -145,7 +145,7 @@ What the optional EasyStock server is, how it is built, and how it behaves. The 
 * Times are ISO 8601 in UTC in the auth and admin endpoints; synced rows keep the app's epoch milliseconds.
 * Errors are RFC 9457 Problem Details with a stable `type` (for example `session-revoked`, `app-too-old`, `invite-expired`, `not-allowed`).
 * Requests must carry `X-EasyStock-App-Version` and `X-EasyStock-Schema-Version`.
-* The schema version is the app's Room DB version. The server accepts the versions whose shared tables it matches (`docs/schema.dbml` in the app repo): currently 10 and 11 (11 only adds an app-only table). A drift test checks that the app's `DB_VERSION` is among them.
+* The schema version is the app's data schema version (`DATA_SCHEMA_VERSION`), not its local Room version (`DB_VERSION`): a Room version that only changes local indexes or app-only tables keeps the data version. The server accepts the versions whose shared tables it matches: currently 10 and 11 (11 only adds an app-only table). A drift test checks that the app's `DATA_SCHEMA_VERSION` is among them and compares the migrated database with the app's Room schema of that version (`shared/schemas/…/<version>.json`, types from `docs/schema.dbml`).
 * Backups: an import accepts `schema_version` up to the highest supported version (11) and refuses a newer one as `backup-newer-version`. An export writes the lowest supported version (10), so every supported app can read it.
 * An app below the minimum version, or with an unsupported schema version, gets 426 with type `app-too-old`.
 * The OpenAPI description is served at `/openapi/v1.json` only in Development or when `EASYSTOCK_OPENAPI=true`. It is always written to `server/openapi/v1.json` at build time.

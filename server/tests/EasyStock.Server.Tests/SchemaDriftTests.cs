@@ -1,3 +1,4 @@
+using System.Text.Json;
 using System.Text.RegularExpressions;
 using EasyStock.Server.DB;
 using EasyStock.Server.Tests.Infrastructure;
@@ -9,10 +10,18 @@ using Xunit;
 namespace EasyStock.Server.Tests;
 
 /// <summary>
-/// The migrated database must match the shared tables of the app's docs/schema.dbml (../EasyStock, or EASYSTOCK_APP_DIR).
+/// The migrated database must match the shared tables of the app (../EasyStock, or EASYSTOCK_APP_DIR), as of the app's
+/// data schema version: the columns, nullability and indexes come from the app's Room schema JSON of that version
+/// (shared/schemas/.../N.json), the column types from docs/schema.dbml (Room only knows SQLite affinities).
 /// Server rules: timestamp and decimal are bigint, json is jsonb, server_seq on every table,
 /// article.image_path is image_sha256 character(64).
 /// </summary>
+/// <remarks>
+/// The app has two version constants in AppDatabase.kt. <c>DB_VERSION</c> is the local Room version: it also moves
+/// for app-only changes (local indexes, app-only tables), which the server never sees. <c>DATA_SCHEMA_VERSION</c> is
+/// the version of the shared data, sent in X-EasyStock-Schema-Version and written in backups: the latest DB_VERSION
+/// whose synced tables are unchanged. The server follows DATA_SCHEMA_VERSION only.
+/// </remarks>
 public sealed partial class SchemaDriftTests(PostgresFixture pg)
 {
     /// <summary>The tables only the server has (not in the app's schema.dbml).</summary>
@@ -37,13 +46,28 @@ public sealed partial class SchemaDriftTests(PostgresFixture pg)
     /// </summary>
     private static readonly HashSet<(string Table, string Columns)> ServerOnlyUniqueIndexes = [("stock_review", "location_id")];
 
+    private const string AppDatabaseFile = "shared/src/commonMain/kotlin/ch/mathorck/easystock/data/db/AppDatabase.kt";
+    private const string AppSchemasDir = "shared/schemas/ch.mathorck.easystock.data.db.AppDatabase";
+
     [Fact]
-    public void Supported_schema_versions_contain_the_apps_db_version()
+    public void Supported_schema_versions_contain_the_apps_data_schema_version()
     {
-        var kotlin = File.ReadAllText(FindAppFile("shared/src/commonMain/kotlin/ch/mathorck/easystock/data/db/AppDatabase.kt"));
-        var m = Regex.Match(kotlin, @"const\s+val\s+DB_VERSION\s*=\s*(\d+)");
-        Assert.True(m.Success, "DB_VERSION not found in AppDatabase.kt");
-        Assert.Contains(int.Parse(m.Groups[1].Value), EasyStock.Server.Helpers.CompatHelper.SupportedSchemaVersions);
+        var version = ReadDataSchemaVersion();
+        Assert.True(EasyStock.Server.Helpers.CompatHelper.SupportedSchemaVersions.Contains(version),
+            $"The app's DATA_SCHEMA_VERSION {version} is not in CompatHelper.SupportedSchemaVersions " +
+            $"[{string.Join(", ", EasyStock.Server.Helpers.CompatHelper.SupportedSchemaVersions)}]");
+    }
+
+    /// <summary>The app's <c>DATA_SCHEMA_VERSION</c> (not DB_VERSION, see the remarks of this class).</summary>
+    private static int ReadDataSchemaVersion()
+    {
+        var path = FindAppFile(AppDatabaseFile);
+        var m = Regex.Match(File.ReadAllText(path), @"const\s+val\s+DATA_SCHEMA_VERSION\s*=\s*(\d+)");
+        if (!m.Success)
+            Assert.Fail($"const val DATA_SCHEMA_VERSION not found in {path}. It is the app's shared-data version (sent in " +
+                        "X-EasyStock-Schema-Version and written in backups), the version this test compares the server with. " +
+                        "If the app renamed or moved it, update SchemaDriftTests.");
+        return int.Parse(m.Groups[1].Value);
     }
 
     /// <summary>The app repository's file, or null when the sibling repository isn't there.</summary>
@@ -83,11 +107,32 @@ public sealed partial class SchemaDriftTests(PostgresFixture pg)
             modelTables = [.. db.Model.GetEntityTypes().Select(e => e.GetTableName()).OfType<string>()];
         }
 
+        var version = ReadDataSchemaVersion();
+        var schemaPath = TryFindAppFile($"{AppSchemasDir}/{version}.json");
+        if (schemaPath == null) Assert.Fail($"The app's Room schema for DATA_SCHEMA_VERSION {version} is missing: {AppSchemasDir}/{version}.json");
+        var room = ReadRoomSchema(await File.ReadAllTextAsync(schemaPath!, ct));
         var dbml = await File.ReadAllTextAsync(FindAppFile("docs/schema.dbml"), ct);
-        var expected = ParseDbml(dbml);
-        var actual = await ReadDatabase(pg.ConnectionString, ct);
+        var types = ParseDbml(dbml);
 
         var problems = new List<string>();
+        // The shared tables are the dbml's tables without the "App only" note. Their columns and nullability come from
+        // the Room schema of the data version, their types from the dbml: the dbml describes the latest DB_VERSION,
+        // whose synced tables are the same as the data version's by definition of DATA_SCHEMA_VERSION.
+        var expected = new Dictionary<string, Dictionary<string, (string Type, bool Nullable)>>();
+        foreach (var (table, dbmlCols) in types)
+        {
+            if (!room.Tables.TryGetValue(table, out var roomCols)) { problems.Add($"shared table {table} is not in {version}.json"); continue; }
+            var cols = expected[table] = [];
+            foreach (var (col, nullable) in roomCols)
+            {
+                if (dbmlCols.TryGetValue(col, out var t)) cols[col] = (t.Type, nullable);
+                else problems.Add($"{table}.{col} is in {version}.json but not in schema.dbml (synced table changed without a new DATA_SCHEMA_VERSION?)");
+            }
+            foreach (var col in dbmlCols.Keys.Except(roomCols.Keys))
+                problems.Add($"{table}.{col} is in schema.dbml but not in {version}.json (synced table changed without a new DATA_SCHEMA_VERSION?)");
+        }
+        var actual = await ReadDatabase(pg.ConnectionString, ct);
+
         foreach (var (table, cols) in expected)
         {
             if (!actual.TryGetValue(table, out var dbCols)) { problems.Add($"missing table {table}"); continue; }
@@ -99,7 +144,7 @@ public sealed partial class SchemaDriftTests(PostgresFixture pg)
                     problems.Add($"{table}.{name}: expected {wantType} {(nullable ? "null" : "not null")}, got {got.Type} {(got.Nullable ? "null" : "not null")}");
             }
             foreach (var extra in dbCols.Keys.Except(cols.Keys).Except(["server_seq", "image_sha256"]))
-                problems.Add($"extra column {table}.{extra} (not in schema.dbml)");
+                problems.Add($"extra column {table}.{extra} (not in {version}.json)");
             if (!dbCols.ContainsKey("server_seq")) problems.Add($"missing column {table}.server_seq");
         }
         // Server-only tables are listed in ServerOnlyTables; the model must not have any other table outside the
@@ -107,18 +152,21 @@ public sealed partial class SchemaDriftTests(PostgresFixture pg)
         foreach (var unlisted in modelTables.Except(expected.Keys).Except(ServerOnlyTables))
             problems.Add($"server-only table {unlisted} is not in ServerOnlyTables");
         foreach (var extra in actual.Keys.Except(expected.Keys).Except(ServerOnlyTables))
-            problems.Add($"extra table {extra} (neither in schema.dbml nor in ServerOnlyTables)");
+            problems.Add($"extra table {extra} (neither a shared table of {version}.json nor in ServerOnlyTables)");
 
-        // Indexes: every dbml index must exist with the same columns and uniqueness. Extra plain indexes are
-        // fine (foreign keys, server_seq, lower() lookups, kept as their definition), an extra unique index is not: it would reject rows the app accepts.
+        // Indexes: every index of the data version's shared tables must exist with the same columns and uniqueness.
+        // Indexes the app added after it (in a DB_VERSION that kept the DATA_SCHEMA_VERSION) are local only and not
+        // required. Extra plain indexes are fine (foreign keys, server_seq, lower() lookups, kept as their definition),
+        // an extra unique index is not: it would reject rows the app accepts.
         var dbIndexes = await ReadIndexes(pg.ConnectionString, ct);
-        foreach (var (table, indexes) in ParseIndexes(dbml))
+        foreach (var table in expected.Keys)
         {
+            var indexes = room.Indexes.GetValueOrDefault(table) ?? [];
             var have = dbIndexes.GetValueOrDefault(table) ?? [];
             foreach (var index in indexes.Where(i => !have.Contains(i)))
                 problems.Add($"missing {(index.Unique ? "unique " : "")}index {table}({index.Columns})");
             foreach (var extra in have.Where(i => i.Unique && !indexes.Contains(i) && !ServerOnlyUniqueIndexes.Contains((table, i.Columns))))
-                problems.Add($"extra unique index {table}({extra.Columns}) (not in schema.dbml)");
+                problems.Add($"extra unique index {table}({extra.Columns}) (not in {version}.json)");
         }
 
         Assert.True(problems.Count == 0, string.Join('\n', problems));
@@ -126,30 +174,28 @@ public sealed partial class SchemaDriftTests(PostgresFixture pg)
 
     private readonly record struct Index(string Columns, bool Unique);
 
-    private static Dictionary<string, HashSet<Index>> ParseIndexes(string dbml)
+    private sealed record RoomSchema(
+        Dictionary<string, Dictionary<string, bool>> Tables, Dictionary<string, HashSet<Index>> Indexes);
+
+    /// <summary>The columns (name to nullable) and the indexes of each table of a Room schema JSON.</summary>
+    private static RoomSchema ReadRoomSchema(string json)
     {
-        var result = new Dictionary<string, HashSet<Index>>();
-        foreach (Match t in TableRegex().Matches(dbml))
+        using var doc = JsonDocument.Parse(json);
+        var tables = new Dictionary<string, Dictionary<string, bool>>();
+        var indexes = new Dictionary<string, HashSet<Index>>();
+        foreach (var entity in doc.RootElement.GetProperty("database").GetProperty("entities").EnumerateArray())
         {
-            if (t.Groups["head"].Value.Contains("note: 'App only", StringComparison.Ordinal)) continue;
-            var indexes = result[t.Groups["name"].Value] = [];
-            var inIndexes = false;
-            foreach (var line in t.Groups["body"].Value.Split('\n').Select(l => l.Trim()))
-            {
-                if (line == "indexes {") { inIndexes = true; continue; }
-                if (line == "}") { inIndexes = false; continue; }
-                if (line.Length == 0 || line.StartsWith("//", StringComparison.Ordinal)) continue;
-                var attrs = AttrRegex().Match(line) is { Success: true } a ? Attributes(a.Groups[1].Value) : [];
-                if (inIndexes)
-                {
-                    var cols = line.Split('[')[0].Trim().Trim('(', ')').Replace(" ", "", StringComparison.Ordinal);
-                    if (!attrs.Contains("pk")) indexes.Add(new Index(cols, attrs.Contains("unique")));
-                }
-                else if (attrs.Contains("unique") && ColumnRegex().Match("  " + line) is { Success: true } c)
-                    indexes.Add(new Index(c.Groups["name"].Value, Unique: true));
-            }
+            var table = entity.GetProperty("tableName").GetString()!;
+            tables[table] = entity.GetProperty("fields").EnumerateArray().ToDictionary(
+                f => f.GetProperty("columnName").GetString()!,
+                f => !(f.TryGetProperty("notNull", out var nn) && nn.GetBoolean()));
+            indexes[table] = entity.TryGetProperty("indices", out var ix)
+                ? [.. ix.EnumerateArray().Select(i => new Index(
+                    string.Join(',', i.GetProperty("columnNames").EnumerateArray().Select(c => c.GetString())),
+                    i.GetProperty("unique").GetBoolean()))]
+                : [];
         }
-        return result;
+        return new RoomSchema(tables, indexes);
     }
 
     /// <summary>The flags of a dbml attribute list (pk, unique, not null...), without notes, defaults or refs.</summary>
@@ -235,9 +281,6 @@ public sealed partial class SchemaDriftTests(PostgresFixture pg)
 
     [GeneratedRegex(@"^\s+(?<name>\w+) (?<type>[\w(),]+)(?: \[(?<attrs>.*)\])?\s*$")]
     private static partial Regex ColumnRegex();
-
-    [GeneratedRegex(@"\[(.*)\]\s*$")]
-    private static partial Regex AttrRegex();
 
     [GeneratedRegex(@"note:\s*'(?:[^'\\]|\\.)*'")]
     private static partial Regex NoteRegex();
