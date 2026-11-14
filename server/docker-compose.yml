@@ -27,12 +27,13 @@ services:
       EASYSTOCK_CERT_FINGERPRINT: ${EASYSTOCK_CERT_FINGERPRINT:-}
       EASYSTOCK_LOG_LEVEL: ${EASYSTOCK_LOG_LEVEL:-}
       EASYSTOCK_TRUSTED_PROXIES: ${EASYSTOCK_TRUSTED_PROXIES:-}
+      EASYSTOCK_IMAGE_QUOTA_MB: ${EASYSTOCK_IMAGE_QUOTA_MB:-}
       EASYSTOCK_CLEANUP_INTERVAL_MINUTES: ${EASYSTOCK_CLEANUP_INTERVAL_MINUTES:-}
     volumes:
       - easystock-data:/data
     ports:
-      # Plain HTTP: bound to loopback so only a reverse proxy on this host can reach it (see README, HTTPS).
-      # Publish it on all interfaces only on a trusted network, or behind something that terminates TLS.
+      # Plain HTTP, published on all interfaces of the host: anyone who can reach port 8080 can reach the server.
+      # Put a reverse proxy that terminates TLS in front of it, or use "127.0.0.1:8080:8080" to keep it local.
       - "8080:8080"
 
 volumes:

@@ -28,7 +28,7 @@ public sealed class PushController(EasyStockDbContext db, ICurrentUser currentUs
         if (!IsAcceptableEndpoint(endpoint))
             return ProblemTypesHelper.Problem(StatusCodes.Status400BadRequest, ProblemTypesHelper.ValidationFailed,
                 "Invalid push endpoint",
-                $"The endpoint must be a public https URL (no localhost or private address) of at most {MaxEndpointLength} characters.");
+                $"The endpoint must be an absolute http or https URL without user info, of at most {MaxEndpointLength} characters.");
 
         var sessionId = currentUser.SessionId;
         var now = time.GetUtcNow().ToUnixTimeMilliseconds();

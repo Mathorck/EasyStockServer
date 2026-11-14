@@ -34,10 +34,10 @@ This server is an **optional** add-on. It lets several phones share one stock, w
 
 - **Shared stock**: several phones sync one catalogue, locations and stock.
 - **Roles**: `admin`, `member`, `viewer` and `guest`, with the same rights as the app, checked on every request.
-- **Movement history**: stock movements are append-only and always keep who made them, so you know who took the axe.
+- **Movement history**: stock movements are append-only and keep who made them, so you know who took the axe (a backup import drops the authors).
 - **First change wins**: when two phones edit the same thing, the first change is kept and the second phone is told, with a choice to keep theirs or re-apply its own.
 - **Accounts**: users change their password and display name; Admins rename, disable and manage users and their devices.
-- **Low-stock alerts**: sent to phones through [UnifiedPush](https://unifiedpush.org), no Google services needed.
+- **Low-stock alerts**: recorded when an article goes below its threshold, and synced to the phones. Push notifications through [UnifiedPush](https://unifiedpush.org) are not implemented yet: phones can register an endpoint, but the server does not send anything to it.
 - **Invites and Guest QR code**: add users with a single-use invite, or let people join as Guests with a printed QR code.
 - **Photos and backups**: photos stored on the server, backup export and import by an Admin.
 
@@ -48,7 +48,7 @@ This server is an **optional** add-on. It lets several phones share one stock, w
 - Docker with Docker Compose.
 - PostgreSQL 16 or newer (the Compose file starts one for you).
 - Modest hardware: a small VPS, a NAS or a Raspberry Pi 4 or newer. Images are built for `linux/amd64` and `linux/arm64`.
-- A reverse proxy for HTTPS (see [HTTPS](#-https)).
+- A reverse proxy for HTTPS.
 
 ---
 
@@ -111,8 +111,8 @@ All settings come from environment variables, with safe defaults. Everything els
 | `EASYSTOCK_CERT_FINGERPRINT` | no | | SHA-256 of a self-signed certificate, written into QR codes |
 | `EASYSTOCK_LOG_LEVEL` | no | from `appsettings.json` (`Information`) | Log level: `Verbose`/`Trace`, `Debug`, `Information`, `Warning`, `Error`, `Fatal`/`Critical`. Overrides `appsettings.json` |
 | `EASYSTOCK_TRUSTED_PROXIES` | no | empty | Comma-separated IPs or CIDR ranges of your reverse proxy. Ranges broader than /8 (IPv4) or /32 (IPv6), such as `0.0.0.0/0`, are refused at startup |
-| `EASYSTOCK_IMAGE_QUOTA_MB` | no | `2048` | Total size of stored photos. An upload past it gets `413 image-quota-exceeded` |
-| `EASYSTOCK_CLEANUP_INTERVAL_MINUTES` | no | `60` | Minutes between background cleanups of expired invites, resets, promotions and sessions |
+| `EASYSTOCK_IMAGE_QUOTA_MB` | no | `2048` | Total size of stored photos. An upload or a backup import past it gets `413 image-quota-exceeded` |
+| `EASYSTOCK_CLEANUP_INTERVAL_MINUTES` | no | `60` | Minutes between background cleanups: expired invites, resets, promotions and sessions, Guests not seen for 90 days, sync batches older than 7 days, photos no article references (30 days after upload) |
 
 The server refuses to start if a required variable is missing or invalid.
 
@@ -150,7 +150,8 @@ Built to store as little personal data as possible, in line with the Swiss nFADP
 - **Stored**: username, display name, role, last seen, device names, and who made each stock movement.
 - **Not stored**: no email address, no phone number, no IP address in the database.
 - **Logs** never contain passwords, tokens, display names or row content, only user IDs (the setup token is the single exception, see [First start](#first-start)).
-- **Movement authors are kept**: the history always shows who made each movement. Disabling or deleting a user never removes their movements.
+- **Movement authors are kept**: the history shows who made each movement. Disabling or deleting a user never removes their movements. A backup import is the exception: backups carry no authors, so imported movements have none.
+- **Inactive Guests are deleted**: a Guest account not seen for 90 days is deleted (its name is removed, its movements stay) with its sessions.
 - **You are the data controller.** Whoever hosts a server is responsible for the data on it: informing users, handling their requests, securing the host and the backups.
 
 ---
