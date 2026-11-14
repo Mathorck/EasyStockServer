@@ -133,6 +133,12 @@ public sealed class AdminUsersTests(PostgresFixture pg)
             Assert.Equal("Deleted user", row.DisplayName);
             Assert.NotNull(row.DeletedAt);
             Assert.Null(row.UserName);
+            Assert.Null(row.NormalizedUserName);
+            Assert.Null(row.PasswordHash);
+            Assert.Null(row.LastSeenAt);
+            // The device names go too (GET /admin/devices lists revoked sessions).
+            Assert.All(await db.DeviceSessions.AsNoTracking().Where(s => s.UserId == user.Id).ToListAsync(Ct),
+                s => Assert.Equal(EasyStock.Server.Helpers.AccountsHelper.DeletedDeviceName, s.DeviceName));
         });
     }
 
