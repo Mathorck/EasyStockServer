@@ -593,6 +593,78 @@ public sealed class AdminBackupTests(PostgresFixture pg) : IAsyncLifetime
     }
 
     [Fact]
+    public async Task Photos_past_the_image_quota_refuse_the_import_and_leave_nothing_behind()
+    {
+        var cs = new NpgsqlConnectionStringBuilder(await pg.CreateDatabaseAsync()) { Pooling = false }.ConnectionString;
+        var factory = new ApiFactory(cs, settings: new Dictionary<string, string> { ["EASYSTOCK_IMAGE_QUOTA_MB"] = "1" });
+        _factories.Add(factory);
+        var s = new Server(factory, factory.ClientFor(await factory.SignInAsync(Role.Admin)));
+        var ct = TestContext.Current.CancellationToken;
+        byte[] Big() { var b = new byte[700 * 1024]; RandomNumberGenerator.Fill(b); b[0] = 0xFF; b[1] = 0xD8; b[2] = 0xFF; b[3] = 0xE0; b[^2] = 0xFF; b[^1] = 0xD9; return b; }
+        string a1 = NewId(), a2 = NewId(), p1 = $"images/{NewId()}.jpg", p2 = $"images/{NewId()}.jpg";
+
+        var r = await Post(s, Backup(Tables(article: [Art(a1, "One " + a1, image: p1), Art(a2, "Two " + a2, image: p2)]),
+            new Dictionary<string, byte[]> { [p1] = Big(), [p2] = Big() }));
+
+        Assert.Equal(HttpStatusCode.RequestEntityTooLarge, r.StatusCode);
+        Assert.Equal("image-quota-exceeded", await ProblemType(r));
+        Assert.Equal(0, await WithDb(s, db => db.Articles.CountAsync(ct)));
+        Assert.Equal(0, await WithDb(s, db => db.Set<ImageRecord>().CountAsync(ct)));
+        var images = Path.Combine(factory.DataDir, "images");
+        Assert.True(!Directory.Exists(images) || !Directory.EnumerateFiles(images, "*", SearchOption.AllDirectories).Any());
+
+        // One photo fits: imported, with its row and file.
+        var ok = await Post(s, Backup(Tables(article: [Art(a1, "One " + a1, image: p1)]), new Dictionary<string, byte[]> { [p1] = Big() }));
+        Assert.Equal(HttpStatusCode.OK, ok.StatusCode);
+        Assert.Equal(1, await WithDb(s, db => db.Set<ImageRecord>().CountAsync(ct)));
+    }
+
+    private static Dictionary<string, object?> WithThreshold(Dictionary<string, object?> article, long threshold)
+    {
+        article["threshold"] = threshold;
+        return article;
+    }
+
+    private static Task<List<Guid>> LowArticlesAsync(Server s) =>
+        WithDb(s, db => db.Set<LowStockState>().Where(x => x.IsLow).Select(x => x.ArticleId).ToListAsync(TestContext.Current.CancellationToken));
+
+    [Fact]
+    public async Task Replace_rebuilds_the_low_stock_state_without_alerting()
+    {
+        var s = await FreshAsync();
+        var ct = TestContext.Current.CancellationToken;
+        string loc = NewId(), low = NewId(), fine = NewId(), noThreshold = NewId();
+
+        var r = await Post(s, Backup(Tables(
+            location: [Loc(loc, "Shelf " + loc)],
+            article: [WithThreshold(Art(low, "Low " + low), 5000), WithThreshold(Art(fine, "Fine " + fine), 5000), Art(noThreshold, "Free " + noThreshold)],
+            movement: [Mov(NewId(), low, loc, 3000), Mov(NewId(), fine, loc, 9000), Mov(NewId(), noThreshold, loc, 0)])), "?mode=replace");
+
+        Assert.Equal(HttpStatusCode.OK, r.StatusCode);
+        Assert.Equal([Guid.Parse(low)], await LowArticlesAsync(s));
+        Assert.Equal(0, await WithDb(s, db => db.Set<LowStockAlert>().CountAsync(ct)));
+    }
+
+    [Fact]
+    public async Task Merge_updates_the_low_stock_state_of_the_merged_articles()
+    {
+        var s = await FreshAsync();
+        string loc = NewId(), art = NewId(), recovering = NewId();
+        var tables = Tables(
+            location: [Loc(loc, "Shelf " + loc)],
+            article: [WithThreshold(Art(art, "Bolt " + art), 5000), WithThreshold(Art(recovering, "Nut " + recovering), 5000)],
+            movement: [Mov(NewId(), art, loc, 6000), Mov(NewId(), recovering, loc, 1000)]);
+        Assert.Equal(HttpStatusCode.OK, (await Post(s, Backup(tables), "?mode=replace")).StatusCode);
+        Assert.Equal([Guid.Parse(recovering)], await LowArticlesAsync(s));
+
+        // The merge brings movements that take one article down and the other back up.
+        tables["stock_movement"] = [Mov(NewId(), art, loc, -2000), Mov(NewId(), recovering, loc, 8000)];
+        Assert.Equal(HttpStatusCode.OK, (await Post(s, Backup(tables))).StatusCode);
+
+        Assert.Equal([Guid.Parse(art)], await LowArticlesAsync(s));
+    }
+
+    [Fact]
     public async Task A_photo_that_is_not_a_jpeg_is_refused_and_odd_entry_names_are_ignored()
     {
         var s = await SharedAsync();

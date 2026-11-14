@@ -177,6 +177,29 @@ public sealed class ImagesTests(PostgresFixture pg) : IDisposable
     }
 
     [Fact]
+    public async Task Concurrent_puts_never_go_past_the_storage_quota()
+    {
+        var ct = TestContext.Current.CancellationToken;
+        using var factory = new ApiFactory(await pg.CreateDatabaseAsync(), settings: new Dictionary<string, string> { ["EASYSTOCK_IMAGE_QUOTA_MB"] = "1" });
+        var c = factory.ClientFor(await factory.SignInAsync(Role.Member));
+        // Each fits alone and passes the early check; only two fit together.
+        var photos = Enumerable.Range(0, 6).Select(_ => Jpeg(400 * 1024)).ToList();
+
+        var answers = await Task.WhenAll(photos.Select(p => c.PutAsync($"/api/v1/images/{Sha(p)}", Body(p), ct)));
+
+        Assert.Equal(2, answers.Count(r => r.StatusCode == HttpStatusCode.Created));
+        Assert.All(answers.Where(r => r.StatusCode != HttpStatusCode.Created),
+            r => Assert.Equal(HttpStatusCode.RequestEntityTooLarge, r.StatusCode));
+        await using var scope = factory.Services.CreateAsyncScope();
+        var db = scope.ServiceProvider.GetRequiredService<EasyStockDbContext>();
+        Assert.True(await ImageHandler.UsedBytesAsync(db, ct) <= 1024 * 1024);
+        var store = factory.Services.GetRequiredService<ImageHandler>();
+        // Refused photos leave neither a file nor a temp file behind.
+        Assert.Equal(2, photos.Count(p => store.Exists(Sha(p))));
+        Assert.Equal(2, Directory.EnumerateFiles(Path.Combine(factory.DataDir, "images"), "*", SearchOption.AllDirectories).Count());
+    }
+
+    [Fact]
     public async Task DeleteOrphans_removes_unreferenced_old_photos_only()
     {
         var ct = TestContext.Current.CancellationToken;

@@ -1,6 +1,8 @@
 using EasyStock.Server.DB.Entities;
 using EasyStock.Server.Enums;
 using EasyStock.Server.Handlers.Cleanup;
+using EasyStock.Server.Handlers.Images;
+using Microsoft.Extensions.DependencyInjection;
 using EasyStock.Server.Helpers;
 using EasyStock.Server.Tests.Infrastructure;
 using Microsoft.EntityFrameworkCore;
@@ -125,6 +127,118 @@ public sealed class CleanupTests(PostgresFixture pg) : IDisposable
             Assert.True(await db.DeviceSessions.AnyAsync(s => s.Id == revokedRecently.SessionId, Ct));
             Assert.True(await db.DeviceSessions.AnyAsync(s => s.Id == active.SessionId, Ct));
             Assert.True(await db.Set<PushRegistration>().AnyAsync(p => p.DeviceSessionId == active.SessionId, Ct));
+        });
+    }
+
+    [Fact]
+    public async Task Guests_unseen_for_90_days_are_soft_deleted_with_their_sessions()
+    {
+        var stale = await _factory.SignInAsync(Role.Guest);
+        var neverSeen = await _factory.SignInAsync(Role.Guest);
+        var recent = await _factory.SignInAsync(Role.Guest);
+        var idleMember = await _factory.SignInAsync(Role.Member);
+        var now = _factory.Time.GetUtcNow();
+        var old = now - CleanupHelper.GuestInactivity - TimeSpan.FromDays(1);
+        await _factory.WithDb(async db =>
+        {
+            await db.Users.Where(u => u.Id == stale.UserId || u.Id == idleMember.UserId)
+                .ExecuteUpdateAsync(u => u.SetProperty(x => x.LastSeenAt, old).SetProperty(x => x.CreatedAt, old), Ct);
+            await db.Users.Where(u => u.Id == neverSeen.UserId)
+                .ExecuteUpdateAsync(u => u.SetProperty(x => x.LastSeenAt, (DateTimeOffset?)null).SetProperty(x => x.CreatedAt, old), Ct);
+            await db.Users.Where(u => u.Id == recent.UserId)
+                .ExecuteUpdateAsync(u => u.SetProperty(x => x.LastSeenAt, now - TimeSpan.FromDays(1)).SetProperty(x => x.CreatedAt, old), Ct);
+            // Keep the sessions themselves fresh: only the Guest rule may delete them.
+            await db.DeviceSessions.Where(x => x.UserId == stale.UserId || x.UserId == neverSeen.UserId)
+                .ExecuteUpdateAsync(x => x.SetProperty(y => y.LastUsedAt, now), Ct);
+        });
+
+        var counts = await RunAsync();
+
+        Assert.NotNull(counts);
+        Assert.True(counts.Guests >= 2);
+        await _factory.WithDb(async db =>
+        {
+            foreach (var gone in new[] { stale, neverSeen })
+            {
+                // Soft delete: the row stays (movements and phones need it), the name goes.
+                var user = await db.Users.SingleAsync(u => u.Id == gone.UserId, Ct);
+                Assert.NotNull(user.DeletedAt);
+                Assert.Equal(EasyStock.Server.Handlers.Admin.AdminUsersHandler.DeletedDisplayName, user.DisplayName);
+                Assert.False(await db.DeviceSessions.AnyAsync(x => x.UserId == gone.UserId, Ct));
+            }
+            Assert.Null((await db.Users.SingleAsync(u => u.Id == recent.UserId, Ct)).DeletedAt);
+            Assert.True(await db.DeviceSessions.AnyAsync(x => x.UserId == recent.UserId, Ct));
+            // A full account is never deleted for inactivity.
+            Assert.Null((await db.Users.SingleAsync(u => u.Id == idleMember.UserId, Ct)).DeletedAt);
+        });
+    }
+
+    [Fact]
+    public async Task Sync_batches_are_deleted_after_seven_days()
+    {
+        var member = await _factory.SignInAsync(Role.Member);
+        var now = _factory.Time.GetUtcNow();
+        Guid oldBatch = Guid.NewGuid(), recentBatch = Guid.NewGuid();
+        await _factory.WithDb(async db =>
+        {
+            db.Set<SyncBatch>().AddRange(
+                new SyncBatch { BatchId = oldBatch, UserId = member.UserId, DeviceSessionId = member.SessionId,
+                    ReceivedAt = now - CleanupHelper.SyncBatchRetention - TimeSpan.FromHours(1), Response = "{}" },
+                new SyncBatch { BatchId = recentBatch, UserId = member.UserId, DeviceSessionId = member.SessionId,
+                    ReceivedAt = now - TimeSpan.FromDays(1), Response = "{}" });
+            await db.SaveChangesAsync(Ct);
+        });
+
+        var counts = await RunAsync();
+
+        Assert.NotNull(counts);
+        Assert.True(counts.SyncBatches >= 1);
+        await _factory.WithDb(async db =>
+        {
+            Assert.False(await db.Set<SyncBatch>().AnyAsync(b => b.BatchId == oldBatch, Ct));
+            Assert.True(await db.Set<SyncBatch>().AnyAsync(b => b.BatchId == recentBatch, Ct));
+        });
+    }
+
+    [Fact]
+    public async Task Orphan_photos_are_deleted_after_the_grace_period_and_referenced_ones_are_kept()
+    {
+        // Own database: the purge is global, and the clock is moved past the grace period.
+        using var factory = new ApiFactory(await pg.CreateDatabaseAsync());
+        var store = factory.Services.GetRequiredService<ImageHandler>();
+        var created = factory.Time.GetUtcNow().ToUnixTimeMilliseconds();
+        string orphan = new('a', 64), used = new('b', 64), usedByTombstone = new('c', 64);
+        foreach (var sha in new[] { orphan, used, usedByTombstone })
+        {
+            Directory.CreateDirectory(Path.GetDirectoryName(store.PathFor(sha))!);
+            await File.WriteAllBytesAsync(store.PathFor(sha), [0xFF, 0xD8, 0xFF, 0xE0, 0xFF, 0xD9], Ct);
+        }
+        await factory.WithDb(async db =>
+        {
+            db.Set<ImageRecord>().AddRange(
+                new ImageRecord { Sha256 = orphan, Size = 6, CreatedAt = created },
+                new ImageRecord { Sha256 = used, Size = 6, CreatedAt = created },
+                new ImageRecord { Sha256 = usedByTombstone, Size = 6, CreatedAt = created });
+            db.Articles.AddRange(
+                new Article { Id = Guid.NewGuid(), Name = "Used", Tracking = "quantity", ImageSha256 = used, CreatedAt = 1, UpdatedAt = 1 },
+                new Article { Id = Guid.NewGuid(), Name = "Gone", Tracking = "quantity", ImageSha256 = usedByTombstone, CreatedAt = 1, UpdatedAt = 1, DeletedAt = 2 });
+            await db.SaveChangesAsync(Ct);
+        });
+
+        var first = await factory.WithService<CleanupCounts?, CleanupHandler>(h => h.RunOnceAsync(Ct));
+        Assert.Equal(0, first!.Images); // within the grace period: the push referencing it may still come
+        Assert.True(store.Exists(orphan));
+
+        factory.Time.Advance(ImagesHelper.OrphanGrace + TimeSpan.FromDays(1));
+        var second = await factory.WithService<CleanupCounts?, CleanupHandler>(h => h.RunOnceAsync(Ct));
+
+        Assert.Equal(1, second!.Images);
+        Assert.False(store.Exists(orphan));
+        Assert.True(store.Exists(used));
+        Assert.True(store.Exists(usedByTombstone));
+        await factory.WithDb(async db =>
+        {
+            Assert.Equal([used, usedByTombstone], await db.Set<ImageRecord>().Select(i => i.Sha256).OrderBy(x => x).ToListAsync(Ct));
         });
     }
 
