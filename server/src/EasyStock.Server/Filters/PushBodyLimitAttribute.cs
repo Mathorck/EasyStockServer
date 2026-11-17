@@ -1,4 +1,3 @@
-using EasyStock.Server.Helpers;
 using EasyStock.Server.Handlers.Sync;
 using Microsoft.AspNetCore.Mvc.Filters;
 

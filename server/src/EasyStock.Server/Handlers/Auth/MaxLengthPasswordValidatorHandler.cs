@@ -1,7 +1,6 @@
 using System.Text.RegularExpressions;
 using EasyStock.Server.DB.Entities;
 using EasyStock.Server.Enums;
-using EasyStock.Server.Helpers;
 using Microsoft.AspNetCore.Identity;
 
 namespace EasyStock.Server.Handlers.Auth;

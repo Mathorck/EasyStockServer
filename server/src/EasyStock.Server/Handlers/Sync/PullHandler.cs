@@ -4,8 +4,6 @@ using EasyStock.Server.Interfaces;
 using EasyStock.Server.DB;
 using EasyStock.Server.DB.Entities;
 using EasyStock.Server.Enums;
-using EasyStock.Server.Helpers;
-using EasyStock.Server.Models;
 using Microsoft.EntityFrameworkCore;
 
 namespace EasyStock.Server.Handlers.Sync;

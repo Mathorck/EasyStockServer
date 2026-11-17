@@ -1,6 +1,5 @@
 using EasyStock.Server.Configuration;
 using EasyStock.Server.DB;
-using EasyStock.Server.Helpers;
 using Microsoft.EntityFrameworkCore;
 
 namespace EasyStock.Server.Handlers.Auth;

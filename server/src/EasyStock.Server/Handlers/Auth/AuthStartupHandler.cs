@@ -2,7 +2,6 @@ using EasyStock.Server.Configuration;
 using EasyStock.Server.DB;
 using EasyStock.Server.DB.Entities;
 using EasyStock.Server.Enums;
-using EasyStock.Server.Models;
 using Microsoft.AspNetCore.Identity;
 using Microsoft.EntityFrameworkCore;
 

@@ -1,16 +1,9 @@
 using EasyStock.Server.DB;
 using EasyStock.Server.DB.Entities;
-using EasyStock.Server.Enums;
 using EasyStock.Server.Handlers.Images;
-using EasyStock.Server.Helpers;
 using Microsoft.EntityFrameworkCore;
 
 namespace EasyStock.Server.Handlers.Cleanup;
-
-/// <summary>Rows touched by one cleanup run. Counts only: nothing identifying is ever logged.</summary>
-public sealed record CleanupCounts(
-    int PromotionsExpired, int Invites, int PasswordResets, int Promotions, int Sessions,
-    int Guests, int SyncBatches, int Images);
 
 /// <summary>
 /// One cleanup pass (docs/03-server-spec.md, "Background jobs"). Sync tombstones (soft-deleted shared rows) and

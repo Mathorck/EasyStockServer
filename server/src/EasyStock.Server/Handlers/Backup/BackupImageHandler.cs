@@ -5,7 +5,6 @@ using EasyStock.Server.Enums;
 using EasyStock.Server.DB.Entities;
 using EasyStock.Server.Handlers.Images;
 using EasyStock.Server.Interfaces;
-using EasyStock.Server.Models;
 using Microsoft.EntityFrameworkCore;
 using Microsoft.Extensions.Options;
 

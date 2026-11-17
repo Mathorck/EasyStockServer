@@ -2,7 +2,6 @@ using EasyStock.Server.DB.Entities;
 using Microsoft.AspNetCore.Identity;
 using Microsoft.AspNetCore.Identity.EntityFrameworkCore;
 using Microsoft.EntityFrameworkCore;
-using Microsoft.EntityFrameworkCore.Design;
 using Microsoft.EntityFrameworkCore.Diagnostics;
 
 namespace EasyStock.Server.DB;
@@ -49,15 +48,4 @@ public sealed class EasyStockDbContext(DbContextOptions<EasyStockDbContext> opti
         options.UseNpgsql(connectionString).UseSnakeCaseNamingConvention()
             // IdentityUserContext maps claims, logins, tokens, e-mail and phone; the model ignores them on purpose.
             .ConfigureWarnings(w => w.Ignore(CoreEventId.MappedEntityTypeIgnoredWarning, CoreEventId.MappedPropertyIgnoredWarning));
-}
-
-/// <summary>Used by `dotnet ef migrations add`: no EASYSTOCK_* variables or running database needed.</summary>
-public sealed class DesignTimeDbContextFactory : IDesignTimeDbContextFactory<EasyStockDbContext>
-{
-    public EasyStockDbContext CreateDbContext(string[] args)
-    {
-        var options = new DbContextOptionsBuilder<EasyStockDbContext>();
-        EasyStockDbContext.Configure(options, "Host=localhost;Database=easystock");
-        return new EasyStockDbContext(options.Options);
-    }
 }

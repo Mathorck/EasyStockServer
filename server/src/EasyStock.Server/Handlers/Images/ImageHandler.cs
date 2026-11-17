@@ -2,8 +2,6 @@ using System.Security.Cryptography;
 using EasyStock.Server.Configuration;
 using EasyStock.Server.DB;
 using EasyStock.Server.DB.Entities;
-using EasyStock.Server.Helpers;
-using EasyStock.Server.Models;
 using Microsoft.EntityFrameworkCore;
 using Microsoft.Extensions.Options;
 

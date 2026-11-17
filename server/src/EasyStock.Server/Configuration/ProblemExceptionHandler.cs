@@ -1,4 +1,3 @@
-using EasyStock.Server.Helpers;
 using Microsoft.AspNetCore.Diagnostics;
 
 namespace EasyStock.Server.Configuration;

@@ -1,8 +1,6 @@
 using EasyStock.Server.Configuration;
 using EasyStock.Server.DB.Entities;
 using EasyStock.Server.Enums;
-using EasyStock.Server.Helpers;
-using EasyStock.Server.Models;
 using Microsoft.AspNetCore.Identity;
 
 namespace EasyStock.Server.Handlers.Auth;

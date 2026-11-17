@@ -1,10 +1,3 @@
-using System.Text.RegularExpressions;
-using EasyStock.Server.Configuration;
-using EasyStock.Server.Helpers;
-using EasyStock.Server.Models;
-using EasyStock.Server.Handlers.Backup;
-using EasyStock.Server.Enums;
-using Microsoft.Extensions.Options;
 
 namespace EasyStock.Server.Interfaces;
 
@@ -38,7 +31,3 @@ public interface IBackupImageHandler
     /// <summary>Removes photo files (after a rolled-back import).</summary>
     void DeleteFiles(IEnumerable<string> sha256s);
 }
-
-/// <param name="Moved">Hashes whose file this call moved into place.</param>
-/// <param name="Inserted">New <c>image</c> rows.</param>
-public sealed record StoredPhotos(IReadOnlyList<string> Moved, int Inserted);

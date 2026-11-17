@@ -7,8 +7,6 @@ using EasyStock.Server.Interfaces;
 using EasyStock.Server.DB;
 using EasyStock.Server.DB.Configurations;
 using EasyStock.Server.DB.Entities;
-using EasyStock.Server.Helpers;
-using EasyStock.Server.Models;
 using Microsoft.EntityFrameworkCore;
 using Npgsql;
 

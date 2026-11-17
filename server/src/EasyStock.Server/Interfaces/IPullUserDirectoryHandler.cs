@@ -1,4 +1,3 @@
-using EasyStock.Server.Models;
 
 namespace EasyStock.Server.Interfaces;
 

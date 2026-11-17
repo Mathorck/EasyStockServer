@@ -1,7 +1,6 @@
 using System.Text.Json;
 using EasyStock.Server.DB;
 using EasyStock.Server.DB.Entities;
-using EasyStock.Server.Models;
 using Microsoft.EntityFrameworkCore;
 
 namespace EasyStock.Server.Handlers.Settings;

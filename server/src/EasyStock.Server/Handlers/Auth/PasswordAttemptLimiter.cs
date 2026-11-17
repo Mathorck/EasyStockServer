@@ -1,4 +1,3 @@
-using EasyStock.Server.Helpers;
 
 namespace EasyStock.Server.Handlers.Auth;
 

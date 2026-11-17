@@ -1,6 +1,5 @@
 using EasyStock.Server.Configuration;
 using EasyStock.Server.DB.Entities;
-using EasyStock.Server.Helpers;
 using Microsoft.Extensions.Options;
 using Microsoft.IdentityModel.JsonWebTokens;
 using Microsoft.IdentityModel.Tokens;

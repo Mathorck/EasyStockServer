@@ -1,9 +1,7 @@
-using EasyStock.Server.Helpers;
 using EasyStock.Server.DB;
 using EasyStock.Server.Handlers.Auth;
 using EasyStock.Server.Handlers.Settings;
 using EasyStock.Server.Handlers.Sync;
-using EasyStock.Server.Models;
 using Microsoft.EntityFrameworkCore;
 
 namespace EasyStock.Server.Handlers.ServerInfo;
@@ -14,7 +12,7 @@ namespace EasyStock.Server.Handlers.ServerInfo;
 /// </summary>
 public sealed class ServerInfoHandler(EasyStockDbContext db, SetupHandler setup, DatasetEpochHandler datasetEpoch, SettingsHandler settings)
 {
-    public async Task<Models.ServerInfo> GetAsync(CancellationToken ct) => new(
+    public async Task<Models.Settings.ServerInfo> GetAsync(CancellationToken ct) => new(
         ServerName: (await settings.GetAsync(ct)).ServerName,
         ServerVersion: CompatHelper.ServerVersion,
         ApiVersion: CompatHelper.ApiVersion,

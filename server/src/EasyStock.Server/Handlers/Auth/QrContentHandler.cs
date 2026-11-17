@@ -1,5 +1,4 @@
 using EasyStock.Server.Configuration;
-using EasyStock.Server.Helpers;
 using Microsoft.Extensions.Logging.Abstractions;
 using Microsoft.Extensions.Options;
 using QRCoder;

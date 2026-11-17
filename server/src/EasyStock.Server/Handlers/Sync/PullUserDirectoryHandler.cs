@@ -1,6 +1,5 @@
 using EasyStock.Server.DB;
 using EasyStock.Server.Interfaces;
-using EasyStock.Server.Models;
 using Microsoft.EntityFrameworkCore;
 
 namespace EasyStock.Server.Handlers.Sync;

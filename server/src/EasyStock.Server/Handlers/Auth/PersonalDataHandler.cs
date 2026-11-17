@@ -3,7 +3,6 @@ using EasyStock.Server.Configuration;
 using EasyStock.Server.DB;
 using EasyStock.Server.DB.Entities;
 using EasyStock.Server.Enums;
-using EasyStock.Server.Helpers;
 using Microsoft.EntityFrameworkCore;
 using Microsoft.Extensions.Options;
 

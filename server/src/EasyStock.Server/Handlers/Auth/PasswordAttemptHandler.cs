@@ -4,17 +4,6 @@ using Microsoft.AspNetCore.Identity;
 
 namespace EasyStock.Server.Handlers.Auth;
 
-/// <summary>Outcome of <see cref="PasswordAttemptHandler.CheckAsync"/>.</summary>
-public enum PasswordAttempt
-{
-    Right,
-    Wrong,
-    /// <summary>This attempt was wrong and locked the account for this address (or everywhere).</summary>
-    WrongAndLocked,
-    /// <summary>The account was already locked for this address; the password was not judged.</summary>
-    Locked,
-}
-
 /// <summary>
 /// Checks a password against the failed-attempt limits of login and <c>POST /me/password</c>, shared by both and kept
 /// by <see cref="PasswordAttemptLimiter"/>: 5 failures lock the account for 15 minutes for the client address they came
