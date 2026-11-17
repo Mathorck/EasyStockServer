@@ -49,6 +49,8 @@ internal sealed class AttributeDefinitionConfiguration : IEntityTypeConfiguratio
         e.Property(x => x.DataType).HasMaxLength(20);
         e.Property(x => x.Unit).HasMaxLength(20);
         e.Property(x => x.Options).HasColumnType(Shared.Json);
+        e.Property(x => x.FlagWhenPast).HasDefaultValue(false);
+        e.Property(x => x.NotifyWhenPast).HasDefaultValue(false);
         e.HasIndex(x => x.Key).IsUnique();
         e.HasIndex(x => x.UpdatedAt);
         e.ServerSeq();
@@ -70,6 +72,8 @@ internal sealed class CategoryAttributeConfiguration : IEntityTypeConfiguration<
 
 internal sealed class ArticleConfiguration : IEntityTypeConfiguration<Article>
 {
+    public const int OrderUrlMax = 2048;
+
     public void Configure(EntityTypeBuilder<Article> e)
     {
         e.ToTable("article");
@@ -80,11 +84,27 @@ internal sealed class ArticleConfiguration : IEntityTypeConfiguration<Article>
         e.Property(x => x.Barcode).HasMaxLength(64);
         e.Property(x => x.ImageSha256).HasMaxLength(64).IsFixedLength();
         e.Property(x => x.Attributes).HasColumnType(Shared.Json);
+        e.Property(x => x.OrderUrl).HasMaxLength(OrderUrlMax);
         e.Ref<Article, Category>(nameof(Article.CategoryId), required: false);
         e.HasIndex(x => x.Sku).IsUnique();
         e.HasIndex(x => x.Barcode).IsUnique();
         e.HasIndex(x => x.CategoryId);
         e.HasIndex(x => x.UpdatedAt);
+        e.ServerSeq();
+    }
+}
+
+internal sealed class ArticleFlagConfiguration : IEntityTypeConfiguration<ArticleFlag>
+{
+    public void Configure(EntityTypeBuilder<ArticleFlag> e)
+    {
+        e.ToTable("article_flag");
+        e.Property(x => x.Note).HasColumnType("text");
+        e.Ref<ArticleFlag, Article>(nameof(ArticleFlag.ArticleId), required: true);
+        e.HasIndex(x => x.ArticleId);
+        e.HasIndex(x => x.UpdatedAt);
+        // Pull names only users some movement or flag names (PullUserDirectoryHandler).
+        e.HasIndex(x => x.CreatedBy);
         e.ServerSeq();
     }
 }
@@ -134,6 +154,10 @@ internal sealed class StockMovementConfiguration : IEntityTypeConfiguration<Stoc
         e.Ref<StockMovement, Item>(nameof(StockMovement.ItemId), required: false);
         e.Ref<StockMovement, Location>(nameof(StockMovement.LocationId), required: true);
         e.HasIndex(x => new { x.ArticleId, x.LocationId });
+        // App schema v12 covering indexes (stock sums and article history), mirrored for the drift test.
+        e.HasIndex(x => new { x.ArticleId, x.LocationId, x.Quantity });
+        e.HasIndex(x => new { x.LocationId, x.ArticleId, x.Quantity });
+        e.HasIndex(x => new { x.ArticleId, x.OccurredAt, x.CreatedAt, x.Id });
         e.HasIndex(x => x.ItemId);
         e.HasIndex(x => x.CreatedAt);
         // Pull names only users some movement names (PullUserDirectoryHandler).

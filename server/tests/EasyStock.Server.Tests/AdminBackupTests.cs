@@ -110,7 +110,7 @@ public sealed class AdminBackupTests(PostgresFixture pg) : IAsyncLifetime
     private static byte[] Backup(
         Dictionary<string, List<Dictionary<string, object?>>>? tables = null,
         Dictionary<string, byte[]>? images = null,
-        string format = "easystock-backup", int formatVersion = 1, int schemaVersion = 10,
+        string format = "easystock-backup", int formatVersion = 1, int schemaVersion = 13,
         params (string Name, byte[] Content)[] extra)
     {
         var entries = new List<(string, byte[])>
@@ -254,13 +254,13 @@ public sealed class AdminBackupTests(PostgresFixture pg) : IAsyncLifetime
         using var manifest = JsonDocument.Parse(files["manifest.json"]);
         Assert.Equal("easystock-backup", manifest.RootElement.GetProperty("format").GetString());
         Assert.Equal(1, manifest.RootElement.GetProperty("format_version").GetInt32());
-        Assert.Equal(10, manifest.RootElement.GetProperty("schema_version").GetInt32());
+        Assert.Equal(13, manifest.RootElement.GetProperty("schema_version").GetInt32());
         Assert.Equal(1, manifest.RootElement.GetProperty("counts").GetProperty("category").GetInt32());
         Assert.Equal(2, manifest.RootElement.GetProperty("counts").GetProperty("stock_movement").GetInt32());
         Assert.Equal(1, manifest.RootElement.GetProperty("counts").GetProperty("images").GetInt32());
 
         foreach (var table in new[] { "category", "attribute_definition", "category_attribute", "location", "article", "item",
-                     "stock_movement", "stock_review", "stock_review_line" })
+                     "stock_movement", "stock_review", "stock_review_line", "article_flag" })
             Assert.True(files.ContainsKey($"tables/{table}.json"), table);
 
         using var articles = JsonDocument.Parse(files["tables/article.json"]);
@@ -509,7 +509,7 @@ public sealed class AdminBackupTests(PostgresFixture pg) : IAsyncLifetime
         await Expect(Zip([("something.txt", [1, 2, 3])]), HttpStatusCode.UnprocessableEntity, "not-a-backup");
         await Expect(Backup(format: "other"), HttpStatusCode.UnprocessableEntity, "not-a-backup");
         await Expect(Backup(formatVersion: 2), HttpStatusCode.UnprocessableEntity, "backup-newer-version");
-        await Expect(Backup(schemaVersion: 12), HttpStatusCode.UnprocessableEntity, "backup-newer-version");
+        await Expect(Backup(schemaVersion: 14), HttpStatusCode.UnprocessableEntity, "backup-newer-version");
         await Expect(Backup(schemaVersion: 9), HttpStatusCode.UnprocessableEntity, "backup-invalid");
         await Expect(Backup(extra: ("tables/category.json", "{ not json"u8.ToArray())), HttpStatusCode.UnprocessableEntity, "backup-invalid");
         await Expect(Backup(extra: ("tables/category.json", "{\"a\":1}"u8.ToArray())), HttpStatusCode.UnprocessableEntity, "backup-invalid");
@@ -562,10 +562,119 @@ public sealed class AdminBackupTests(PostgresFixture pg) : IAsyncLifetime
         Assert.Equal(HttpStatusCode.UnprocessableEntity, refused.StatusCode);
     }
 
+    [Theory]
+    [InlineData(10)]
+    [InlineData(11)]
+    [InlineData(12)]
+    public async Task An_older_backup_is_imported_with_defaults_for_the_newer_fields(int version)
+    {
+        var s = await FreshAsync();
+        var art = NewId();
+        var attr = NewId();
+        var oldAttr = new Dictionary<string, object?>
+        {
+            ["id"] = attr, ["key"] = "k" + attr[..8], ["label"] = "Date", ["data_type"] = "date", ["unit"] = null, ["options"] = null,
+            ["created_at"] = 1L, ["updated_at"] = 1000L, ["deleted_at"] = null,
+        };
+        var tables = Tables(article: [Art(art, "Old backup " + art)]);
+        tables["attribute_definition"] = [oldAttr];
+        var r = await Post(s, Backup(tables, schemaVersion: version), "?mode=replace");
+        Assert.Equal(HttpStatusCode.OK, r.StatusCode);
+
+        var ct = TestContext.Current.CancellationToken;
+        Assert.Null(await WithDb(s, db => db.Articles.Select(a => a.OrderUrl).SingleAsync(ct)));
+        Assert.Equal((false, false), await WithDb(s, async db =>
+        {
+            var d = await db.AttributeDefinitions.SingleAsync(ct);
+            return (d.FlagWhenPast, d.NotifyWhenPast);
+        }));
+        Assert.Equal(0, await WithDb(s, db => db.ArticleFlags.CountAsync(ct)));
+    }
+
+    [Fact]
+    public async Task Export_then_replace_import_keeps_flags_with_author_and_resolution_and_the_new_columns()
+    {
+        var a = await FreshAsync();
+        var ct = TestContext.Current.CancellationToken;
+        var author = await WithDb(a, db => db.Users.Select(u => u.Id).FirstAsync(ct)); // an author of this server
+        var art = Guid.NewGuid();
+        var attr = Guid.NewGuid();
+        var open = Guid.NewGuid();
+        var resolved = Guid.NewGuid();
+        await WithDb(a, async db =>
+        {
+            db.Articles.Add(new Article { Id = art, Name = "Flagged " + art, Tracking = "quantity", Unit = "pce", CreatedAt = 1, UpdatedAt = 10, OrderUrl = "https://shop.example/o?x=1" });
+            db.AttributeDefinitions.Add(new AttributeDefinition { Id = attr, Key = "exp" + attr.ToString("N")[..8], Label = "Expiry", DataType = "date", FlagWhenPast = true, NotifyWhenPast = true, CreatedAt = 1, UpdatedAt = 10 });
+            await db.SaveChangesAsync(ct);
+            db.ArticleFlags.Add(new ArticleFlag { Id = open, ArticleId = art, Note = "Open one", CreatedAt = 5, UpdatedAt = 5, CreatedBy = author });
+            db.ArticleFlags.Add(new ArticleFlag { Id = resolved, ArticleId = art, Note = "Done one", CreatedAt = 6, UpdatedAt = 20, CreatedBy = author, ResolvedAt = 20 });
+            await db.SaveChangesAsync(ct);
+            return 0;
+        });
+
+        var exported = await Export(a);
+        Assert.Equal(HttpStatusCode.OK, (await Post(a, exported, "?mode=replace")).StatusCode);
+
+        var flags = await WithDb(a, db => db.ArticleFlags.AsNoTracking().OrderBy(f => f.CreatedAt).ToListAsync(ct));
+        Assert.Equal([open, resolved], flags.Select(f => f.Id));
+        Assert.All(flags, f => Assert.Equal(author, f.CreatedBy));
+        Assert.Null(flags[0].ResolvedAt);
+        Assert.Equal(20, flags[1].ResolvedAt);
+        Assert.Equal("Done one", flags[1].Note);
+        Assert.Equal("https://shop.example/o?x=1", await WithDb(a, db => db.Articles.Select(x => x.OrderUrl).SingleAsync(ct)));
+        var d = await WithDb(a, db => db.AttributeDefinitions.SingleAsync(ct));
+        Assert.True(d.FlagWhenPast);
+        Assert.True(d.NotifyWhenPast);
+
+        var again = Unzip(await Export(a));
+        Assert.True(Unzip(exported)["tables/article_flag.json"].SequenceEqual(again["tables/article_flag.json"]));
+    }
+
+    private static Dictionary<string, object?> Flag(string id, string article, string? createdBy, string note = "Torn label", long? resolvedAt = null) => new()
+    {
+        ["id"] = id, ["article_id"] = article, ["note"] = note, ["created_at"] = 5L, ["updated_at"] = 5L,
+        ["created_by"] = createdBy, ["resolved_at"] = resolvedAt, ["deleted_at"] = null,
+    };
+
+    [Theory]
+    [InlineData("replace")]
+    [InlineData("merge")]
+    public async Task A_flag_author_unknown_to_this_server_is_dropped_and_a_known_one_is_kept(string mode)
+    {
+        var s = await FreshAsync();
+        var ct = TestContext.Current.CancellationToken;
+        var known = await WithDb(s, db => db.Users.Select(u => u.Id).FirstAsync(ct));
+        var art = NewId();
+        var foreign = NewId(); var mine = NewId(); var crafted = NewId();
+        var tables = Tables(article: [Art(art, "Flagged " + art)]);
+        tables["article_flag"] = [Flag(foreign, art, Guid.NewGuid().ToString()), Flag(mine, art, known.ToString()), Flag(crafted, art, null)];
+        Assert.Equal(HttpStatusCode.OK, (await Post(s, Backup(tables), "?mode=" + mode)).StatusCode);
+
+        var authors = await WithDb(s, db => db.ArticleFlags.ToDictionaryAsync(f => f.Id, f => f.CreatedBy, ct));
+        Assert.Null(authors[Guid.Parse(foreign)]);
+        Assert.Equal(known, authors[Guid.Parse(mine)]);
+        Assert.Null(authors[Guid.Parse(crafted)]);
+    }
+
+    [Fact]
+    public async Task A_flag_note_over_1000_characters_refuses_the_backup()
+    {
+        var s = await FreshAsync();
+        var art = NewId();
+        var ok = Tables(article: [Art(art, "A " + art)]);
+        ok["article_flag"] = [Flag(NewId(), art, null, new string('n', 1000))];
+        Assert.Equal(HttpStatusCode.OK, (await Post(s, Backup(ok))).StatusCode);
+        var bad = Tables(article: [Art(art, "A " + art)]);
+        bad["article_flag"] = [Flag(NewId(), art, null, new string('n', 1001))];
+        var r = await Post(s, Backup(bad));
+        Assert.Equal(HttpStatusCode.UnprocessableEntity, r.StatusCode);
+        Assert.Equal("backup-invalid", await ProblemType(r));
+    }
+
     [Fact]
     public async Task Backup_with_the_newest_supported_schema_version_is_accepted()
     {
-        var r = await Post(await SharedAsync(), Backup(schemaVersion: 11));
+        var r = await Post(await SharedAsync(), Backup(schemaVersion: 13));
         Assert.Equal(HttpStatusCode.OK, r.StatusCode);
     }
 

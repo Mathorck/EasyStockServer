@@ -29,13 +29,14 @@ public sealed class ServerInfoHandler(EasyStockDbContext db, SetupHandler setup,
     private Task<bool> GuestSignupWorksAsync(CancellationToken ct) =>
         db.PublicInvites.AsNoTracking().AnyAsync(p => p.Enabled && p.TokenHash != null, ct);
 
-    /// <summary>Any row in one of the 9 shared tables (one cheap EXISTS each; deleted rows count: they are still data).</summary>
+    /// <summary>Any row in one of the 10 shared tables (one cheap EXISTS each; deleted rows count: they are still data).</summary>
     private async Task<bool> HasDataAsync(CancellationToken ct) =>
         await db.Categories.AnyAsync(ct)
         || await db.AttributeDefinitions.AnyAsync(ct)
         || await db.CategoryAttributes.AnyAsync(ct)
         || await db.Articles.AnyAsync(ct)
         || await db.Locations.AnyAsync(ct)
+        || await db.ArticleFlags.AnyAsync(ct)
         || await db.Items.AnyAsync(ct)
         || await db.StockMovements.AnyAsync(ct)
         || await db.StockReviews.AnyAsync(ct)

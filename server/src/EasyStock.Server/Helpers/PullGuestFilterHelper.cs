@@ -12,6 +12,7 @@ namespace EasyStock.Server.Helpers;
 /// <list type="bullet">
 /// <item>without ViewHistory: movements lose createdBy, deviceId and comment; users is empty;</item>
 /// <item>without ViewReviews: stock_review and stock_review_line are left out;</item>
+/// <item>without FlagArticle: article_flag is left out;</item>
 /// <item>without ReceiveAlerts: alerts is empty.</item>
 /// </list>
 /// </summary>
@@ -36,6 +37,8 @@ internal static class PullGuestFilterHelper
         if (!Can(Permission.ViewReviews))
             foreach (var table in PullTablesHelper.ReviewTables)
                 rows.Remove(table);
+        if (!Can(Permission.FlagArticle))
+            rows.Remove(PullTablesHelper.ArticleFlag);
         if (!Can(Permission.ReceiveAlerts))
             alerts = [];
 

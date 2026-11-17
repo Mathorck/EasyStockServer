@@ -34,7 +34,9 @@ public static class PushRowValidatorHelper
             && Optional(l.Color, 32) && Optional(l.Barcode, 64),
         Article a => Times(a.CreatedAt, a.UpdatedAt, a.DeletedAt) && Optional(a.Sku, SkuMax) && Text(a.Name, 255)
             && Trackings.Contains(a.Tracking) && Text(a.Unit, 20) && Optional(a.Barcode, 64)
+            && Optional(a.OrderUrl, DB.Configurations.ArticleConfiguration.OrderUrlMax)
             && Threshold(a.Threshold) && FreeText(a.Description) && Sha256(a.ImageSha256) && Json(a.Attributes, JsonValueKind.Object),
+        ArticleFlag f => Times(f.CreatedAt, f.UpdatedAt, f.DeletedAt) && (f.ResolvedAt is null || f.ResolvedAt >= f.CreatedAt) && FlagNote(f.Note),
         Item i => Times(i.CreatedAt, i.UpdatedAt, i.DeletedAt) && Optional(i.SerialNumber, SerialMax)
             && ItemStatuses.Contains(i.Status) && Json(i.Attributes, JsonValueKind.Object),
         StockMovement m => Times(m.CreatedAt, m.OccurredAt, null) && Reasons.Contains(m.Reason) && MovementQuantity(m.Quantity)
@@ -51,6 +53,11 @@ public static class PushRowValidatorHelper
 
     // PostgreSQL text and jsonb reject U+0000, which would otherwise surface as a 500.
     private static bool Text(string value, int max) => !string.IsNullOrWhiteSpace(value) && value.Length <= max && !HasNul(value);
+
+    /// <summary>Same limit as the app.</summary>
+    public const int FlagNoteMax = 1000;
+
+    private static bool FlagNote(string value) => Text(value, FlagNoteMax);
 
     private static bool Optional(string? value, int max) => value is null || (value.Length > 0 && value.Length <= max && !HasNul(value));
 

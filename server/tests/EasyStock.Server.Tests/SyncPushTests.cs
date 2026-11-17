@@ -31,16 +31,27 @@ public sealed class SyncPushTests(PostgresFixture pg) : IDisposable
 
     // ---- Roles ----
 
-    [Theory]
-    [InlineData(Role.Viewer)]
-    [InlineData(Role.Guest)]
-    public async Task Viewer_and_guest_get_403_for_the_whole_request(Role role)
+    [Fact]
+    public async Task Guest_gets_403_for_the_whole_request()
     {
         var category = NewCategory();
-        var answer = await _factory.PushClient(await _factory.SignInAsync(role)).PushAsync((SyncTablesCategory, Wire(category)));
+        var answer = await _factory.PushClient(await _factory.SignInAsync(Role.Guest)).PushAsync((SyncTablesCategory, Wire(category)));
 
         Assert.Equal(HttpStatusCode.Forbidden, answer.Status);
         Assert.Equal("not-allowed", (string?)answer.Json["type"]);
+        Assert.False(await _factory.QueryAsync(db => db.Categories.AnyAsync(c => c.Id == category.Id, Ct)));
+    }
+
+    // A Viewer can raise a flag (ArticleFlagSyncTests), so the request is let in: every other row is refused one by one.
+    [Fact]
+    public async Task Viewer_is_refused_every_row_except_a_new_flag()
+    {
+        var category = NewCategory();
+        var answer = await _factory.PushClient(await _factory.SignInAsync(Role.Viewer)).PushAsync((SyncTablesCategory, Wire(category)));
+
+        Assert.Equal(HttpStatusCode.OK, answer.Status);
+        Assert.Equal("rejected", (string?)answer.Result(SyncTablesCategory, category.Id)["status"]);
+        Assert.Equal("not-allowed", (string?)answer.Result(SyncTablesCategory, category.Id)["reason"]);
         Assert.False(await _factory.QueryAsync(db => db.Categories.AnyAsync(c => c.Id == category.Id, Ct)));
     }
 

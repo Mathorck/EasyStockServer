@@ -22,7 +22,17 @@ public static class PushPermissionsHelper
     public static bool IsAllowed(Role role, object incoming, object? existing) =>
         Needs(incoming, existing).All(n => n.Permission is { } p ? Permissions.Can(role, p) : role == Role.Admin);
 
+    /// <summary>
+    /// The push endpoint only requires <see cref="Permission.FlagArticle"/> (a Viewer can raise flags), so every row
+    /// but a new flag also needs <see cref="Permission.PushChanges"/>.
+    /// </summary>
     public static IEnumerable<Need> Needs(object incoming, object? existing)
+    {
+        if (incoming is not ArticleFlag) yield return Permission.PushChanges;
+        foreach (var need in RowNeeds(incoming, existing)) yield return need;
+    }
+
+    private static IEnumerable<Need> RowNeeds(object incoming, object? existing)
     {
         switch (incoming)
         {
@@ -49,6 +59,11 @@ public static class PushPermissionsHelper
                 var oldArticle = existing as Article;
                 if (a.Barcode != oldArticle?.Barcode) yield return Permission.LinkTag;
                 if (a.DeletedAt != oldArticle?.DeletedAt) yield return Permission.Delete;
+                break;
+            case ArticleFlag f:
+                // Raising a flag is open to Viewers. Resolving, editing and deleting one is a normal push.
+                if (existing is null && f.ResolvedAt is null && f.DeletedAt is null) yield return Permission.FlagArticle;
+                else yield return Permission.PushChanges;
                 break;
             case Item i:
                 yield return Permission.Edit;

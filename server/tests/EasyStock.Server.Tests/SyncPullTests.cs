@@ -46,7 +46,7 @@ public sealed class SyncPullTests(PostgresFixture pg) : IAsyncLifetime
     {
         var client = factory.CreateClient();
         client.DefaultRequestHeaders.Add("X-EasyStock-App-Version", "1.0.0");
-        client.DefaultRequestHeaders.Add("X-EasyStock-Schema-Version", "10");
+        client.DefaultRequestHeaders.Add("X-EasyStock-Schema-Version", "13");
         client.DefaultRequestHeaders.Authorization = new System.Net.Http.Headers.AuthenticationHeaderValue("Bearer", user.AccessToken);
         return client;
     }

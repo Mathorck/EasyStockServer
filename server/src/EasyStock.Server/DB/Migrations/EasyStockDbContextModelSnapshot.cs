@@ -183,6 +183,11 @@ namespace EasyStock.Server.DB.Migrations
                         .HasColumnType("boolean")
                         .HasColumnName("name_auto");
 
+                    b.Property<string>("OrderUrl")
+                        .HasMaxLength(2048)
+                        .HasColumnType("character varying(2048)")
+                        .HasColumnName("order_url");
+
                     b.Property<long>("ServerSeq")
                         .ValueGeneratedOnAddOrUpdate()
                         .HasColumnType("bigint")
@@ -236,6 +241,65 @@ namespace EasyStock.Server.DB.Migrations
                     b.ToTable("article", (string)null);
                 });
 
+            modelBuilder.Entity("EasyStock.Server.DB.Entities.ArticleFlag", b =>
+                {
+                    b.Property<Guid>("Id")
+                        .ValueGeneratedOnAdd()
+                        .HasColumnType("uuid")
+                        .HasColumnName("id");
+
+                    b.Property<Guid>("ArticleId")
+                        .HasColumnType("uuid")
+                        .HasColumnName("article_id");
+
+                    b.Property<long>("CreatedAt")
+                        .HasColumnType("bigint")
+                        .HasColumnName("created_at");
+
+                    b.Property<Guid?>("CreatedBy")
+                        .HasColumnType("uuid")
+                        .HasColumnName("created_by");
+
+                    b.Property<long?>("DeletedAt")
+                        .HasColumnType("bigint")
+                        .HasColumnName("deleted_at");
+
+                    b.Property<string>("Note")
+                        .IsRequired()
+                        .HasColumnType("text")
+                        .HasColumnName("note");
+
+                    b.Property<long?>("ResolvedAt")
+                        .HasColumnType("bigint")
+                        .HasColumnName("resolved_at");
+
+                    b.Property<long>("ServerSeq")
+                        .ValueGeneratedOnAddOrUpdate()
+                        .HasColumnType("bigint")
+                        .HasColumnName("server_seq");
+
+                    b.Property<long>("UpdatedAt")
+                        .HasColumnType("bigint")
+                        .HasColumnName("updated_at");
+
+                    b.HasKey("Id")
+                        .HasName("pk_article_flag");
+
+                    b.HasIndex("ArticleId")
+                        .HasDatabaseName("ix_article_flag_article_id");
+
+                    b.HasIndex("CreatedBy")
+                        .HasDatabaseName("ix_article_flag_created_by");
+
+                    b.HasIndex("ServerSeq")
+                        .HasDatabaseName("ix_article_flag_server_seq");
+
+                    b.HasIndex("UpdatedAt")
+                        .HasDatabaseName("ix_article_flag_updated_at");
+
+                    b.ToTable("article_flag", (string)null);
+                });
+
             modelBuilder.Entity("EasyStock.Server.DB.Entities.AttributeAlias", b =>
                 {
                     b.Property<Guid>("AliasId")
@@ -276,6 +340,12 @@ namespace EasyStock.Server.DB.Migrations
                         .HasColumnType("bigint")
                         .HasColumnName("deleted_at");
 
+                    b.Property<bool>("FlagWhenPast")
+                        .ValueGeneratedOnAdd()
+                        .HasColumnType("boolean")
+                        .HasDefaultValue(false)
+                        .HasColumnName("flag_when_past");
+
                     b.Property<string>("Key")
                         .IsRequired()
                         .HasMaxLength(50)
@@ -287,6 +357,12 @@ namespace EasyStock.Server.DB.Migrations
                         .HasMaxLength(100)
                         .HasColumnType("character varying(100)")
                         .HasColumnName("label");
+
+                    b.Property<bool>("NotifyWhenPast")
+                        .ValueGeneratedOnAdd()
+                        .HasColumnType("boolean")
+                        .HasDefaultValue(false)
+                        .HasColumnName("notify_when_past");
 
                     b.Property<string>("Options")
                         .HasColumnType("jsonb")
@@ -1038,14 +1114,20 @@ namespace EasyStock.Server.DB.Migrations
                     b.HasIndex("ItemId")
                         .HasDatabaseName("ix_stock_movement_item_id");
 
-                    b.HasIndex("LocationId")
-                        .HasDatabaseName("ix_stock_movement_location_id");
-
                     b.HasIndex("ServerSeq")
                         .HasDatabaseName("ix_stock_movement_server_seq");
 
                     b.HasIndex("ArticleId", "LocationId")
                         .HasDatabaseName("ix_stock_movement_article_id_location_id");
+
+                    b.HasIndex("ArticleId", "LocationId", "Quantity")
+                        .HasDatabaseName("ix_stock_movement_article_id_location_id_quantity");
+
+                    b.HasIndex("ArticleId", "OccurredAt", "CreatedAt", "Id")
+                        .HasDatabaseName("ix_stock_movement_article_id_occurred_at_created_at_id");
+
+                    b.HasIndex("LocationId", "ArticleId", "Quantity")
+                        .HasDatabaseName("ix_stock_movement_location_id_article_id_quantity");
 
                     b.ToTable("stock_movement", (string)null);
                 });
@@ -1267,6 +1349,16 @@ namespace EasyStock.Server.DB.Migrations
                         .HasForeignKey("CategoryId")
                         .OnDelete(DeleteBehavior.Restrict)
                         .HasConstraintName("fk_article_categories_category_id");
+                });
+
+            modelBuilder.Entity("EasyStock.Server.DB.Entities.ArticleFlag", b =>
+                {
+                    b.HasOne("EasyStock.Server.DB.Entities.Article", null)
+                        .WithMany()
+                        .HasForeignKey("ArticleId")
+                        .OnDelete(DeleteBehavior.Restrict)
+                        .IsRequired()
+                        .HasConstraintName("fk_article_flag_article_article_id");
                 });
 
             modelBuilder.Entity("EasyStock.Server.DB.Entities.AttributeAlias", b =>

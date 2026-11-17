@@ -67,6 +67,7 @@ public sealed class BackupExportHandler(
             ["category_attribute"] = await db.CategoryAttributes.CountAsync(ct),
             ["location"] = await db.Locations.CountAsync(ct),
             ["article"] = await db.Articles.CountAsync(ct),
+            ["article_flag"] = await db.ArticleFlags.CountAsync(ct),
             ["item"] = await db.Items.CountAsync(ct),
             ["stock_movement"] = await db.StockMovements.CountAsync(ct),
             ["stock_review"] = await db.StockReviews.CountAsync(ct),
@@ -84,6 +85,7 @@ public sealed class BackupExportHandler(
         await WriteRowsAsync(zip, BackupTable.Location, db.Locations.AsNoTracking().OrderBy(x => x.Id), x => x.ToRow(), ct);
         await WriteRowsAsync(zip, BackupTable.Article, db.Articles.AsNoTracking().OrderBy(x => x.Id),
             x => x.ImageSha256 is not null && !available.Contains(x.ImageSha256) ? x.ToRow() with { ImagePath = null } : x.ToRow(), ct);
+        await WriteRowsAsync(zip, BackupTable.ArticleFlag, db.ArticleFlags.AsNoTracking().OrderBy(x => x.Id), x => x.ToRow(), ct);
         await WriteRowsAsync(zip, BackupTable.Item, db.Items.AsNoTracking().OrderBy(x => x.Id), x => x.ToRow(), ct);
         await WriteRowsAsync(zip, BackupTable.StockMovement, db.StockMovements.AsNoTracking().OrderBy(x => x.CreatedAt).ThenBy(x => x.Id), x => x.ToRow(), ct);
         await WriteRowsAsync(zip, BackupTable.StockReview, db.StockReviews.AsNoTracking().OrderBy(x => x.Id), x => x.ToRow(), ct);

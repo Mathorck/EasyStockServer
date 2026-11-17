@@ -23,7 +23,7 @@
           {
             "name": "X-EasyStock-Schema-Version",
             "in": "header",
-            "description": "The app's Room DB version. Supported: 10, 11.",
+            "description": "The app's Room DB version. Supported: 13.",
             "required": true,
             "schema": {
               "type": "integer",
@@ -208,7 +208,7 @@
           {
             "name": "X-EasyStock-Schema-Version",
             "in": "header",
-            "description": "The app's Room DB version. Supported: 10, 11.",
+            "description": "The app's Room DB version. Supported: 13.",
             "required": true,
             "schema": {
               "type": "integer",
@@ -446,7 +446,7 @@
           {
             "name": "X-EasyStock-Schema-Version",
             "in": "header",
-            "description": "The app's Room DB version. Supported: 10, 11.",
+            "description": "The app's Room DB version. Supported: 13.",
             "required": true,
             "schema": {
               "type": "integer",
@@ -584,7 +584,7 @@
           {
             "name": "X-EasyStock-Schema-Version",
             "in": "header",
-            "description": "The app's Room DB version. Supported: 10, 11.",
+            "description": "The app's Room DB version. Supported: 13.",
             "required": true,
             "schema": {
               "type": "integer",
@@ -697,7 +697,7 @@
           {
             "name": "X-EasyStock-Schema-Version",
             "in": "header",
-            "description": "The app's Room DB version. Supported: 10, 11.",
+            "description": "The app's Room DB version. Supported: 13.",
             "required": true,
             "schema": {
               "type": "integer",
@@ -855,7 +855,7 @@
           {
             "name": "X-EasyStock-Schema-Version",
             "in": "header",
-            "description": "The app's Room DB version. Supported: 10, 11.",
+            "description": "The app's Room DB version. Supported: 13.",
             "required": true,
             "schema": {
               "type": "integer",
@@ -1003,7 +1003,7 @@
           {
             "name": "X-EasyStock-Schema-Version",
             "in": "header",
-            "description": "The app's Room DB version. Supported: 10, 11.",
+            "description": "The app's Room DB version. Supported: 13.",
             "required": true,
             "schema": {
               "type": "integer",
@@ -1126,7 +1126,7 @@
           {
             "name": "X-EasyStock-Schema-Version",
             "in": "header",
-            "description": "The app's Room DB version. Supported: 10, 11.",
+            "description": "The app's Room DB version. Supported: 13.",
             "required": true,
             "schema": {
               "type": "integer",
@@ -1244,7 +1244,7 @@
           {
             "name": "X-EasyStock-Schema-Version",
             "in": "header",
-            "description": "The app's Room DB version. Supported: 10, 11.",
+            "description": "The app's Room DB version. Supported: 13.",
             "required": true,
             "schema": {
               "type": "integer",
@@ -1394,7 +1394,7 @@
           {
             "name": "X-EasyStock-Schema-Version",
             "in": "header",
-            "description": "The app's Room DB version. Supported: 10, 11.",
+            "description": "The app's Room DB version. Supported: 13.",
             "required": true,
             "schema": {
               "type": "integer",
@@ -1514,7 +1514,7 @@
           {
             "name": "X-EasyStock-Schema-Version",
             "in": "header",
-            "description": "The app's Room DB version. Supported: 10, 11.",
+            "description": "The app's Room DB version. Supported: 13.",
             "required": true,
             "schema": {
               "type": "integer",
@@ -1702,7 +1702,7 @@
           {
             "name": "X-EasyStock-Schema-Version",
             "in": "header",
-            "description": "The app's Room DB version. Supported: 10, 11.",
+            "description": "The app's Room DB version. Supported: 13.",
             "required": true,
             "schema": {
               "type": "integer",
@@ -1942,7 +1942,7 @@
           {
             "name": "X-EasyStock-Schema-Version",
             "in": "header",
-            "description": "The app's Room DB version. Supported: 10, 11.",
+            "description": "The app's Room DB version. Supported: 13.",
             "required": true,
             "schema": {
               "type": "integer",
@@ -2080,7 +2080,7 @@
           {
             "name": "X-EasyStock-Schema-Version",
             "in": "header",
-            "description": "The app's Room DB version. Supported: 10, 11.",
+            "description": "The app's Room DB version. Supported: 13.",
             "required": true,
             "schema": {
               "type": "integer",
@@ -2257,7 +2257,7 @@
           {
             "name": "X-EasyStock-Schema-Version",
             "in": "header",
-            "description": "The app's Room DB version. Supported: 10, 11.",
+            "description": "The app's Room DB version. Supported: 13.",
             "required": true,
             "schema": {
               "type": "integer",
@@ -2389,7 +2389,7 @@
           {
             "name": "X-EasyStock-Schema-Version",
             "in": "header",
-            "description": "The app's Room DB version. Supported: 10, 11.",
+            "description": "The app's Room DB version. Supported: 13.",
             "required": true,
             "schema": {
               "type": "integer",
@@ -2538,7 +2538,7 @@
           {
             "name": "X-EasyStock-Schema-Version",
             "in": "header",
-            "description": "The app's Room DB version. Supported: 10, 11.",
+            "description": "The app's Room DB version. Supported: 13.",
             "required": true,
             "schema": {
               "type": "integer",
@@ -2715,7 +2715,7 @@
           {
             "name": "X-EasyStock-Schema-Version",
             "in": "header",
-            "description": "The app's Room DB version. Supported: 10, 11.",
+            "description": "The app's Room DB version. Supported: 13.",
             "required": true,
             "schema": {
               "type": "integer",
@@ -2828,7 +2828,7 @@
           {
             "name": "X-EasyStock-Schema-Version",
             "in": "header",
-            "description": "The app's Room DB version. Supported: 10, 11.",
+            "description": "The app's Room DB version. Supported: 13.",
             "required": true,
             "schema": {
               "type": "integer",
@@ -2983,7 +2983,7 @@
           {
             "name": "X-EasyStock-Schema-Version",
             "in": "header",
-            "description": "The app's Room DB version. Supported: 10, 11.",
+            "description": "The app's Room DB version. Supported: 13.",
             "required": true,
             "schema": {
               "type": "integer",
@@ -3148,7 +3148,7 @@
           {
             "name": "X-EasyStock-Schema-Version",
             "in": "header",
-            "description": "The app's Room DB version. Supported: 10, 11.",
+            "description": "The app's Room DB version. Supported: 13.",
             "required": true,
             "schema": {
               "type": "integer",
@@ -3313,7 +3313,7 @@
           {
             "name": "X-EasyStock-Schema-Version",
             "in": "header",
-            "description": "The app's Room DB version. Supported: 10, 11.",
+            "description": "The app's Room DB version. Supported: 13.",
             "required": true,
             "schema": {
               "type": "integer",
@@ -3458,7 +3458,7 @@
           {
             "name": "X-EasyStock-Schema-Version",
             "in": "header",
-            "description": "The app's Room DB version. Supported: 10, 11.",
+            "description": "The app's Room DB version. Supported: 13.",
             "required": true,
             "schema": {
               "type": "integer",
@@ -3603,7 +3603,7 @@
           {
             "name": "X-EasyStock-Schema-Version",
             "in": "header",
-            "description": "The app's Room DB version. Supported: 10, 11.",
+            "description": "The app's Room DB version. Supported: 13.",
             "required": true,
             "schema": {
               "type": "integer",
@@ -3758,7 +3758,7 @@
           {
             "name": "X-EasyStock-Schema-Version",
             "in": "header",
-            "description": "The app's Room DB version. Supported: 10, 11.",
+            "description": "The app's Room DB version. Supported: 13.",
             "required": true,
             "schema": {
               "type": "integer",
@@ -3938,7 +3938,7 @@
           {
             "name": "X-EasyStock-Schema-Version",
             "in": "header",
-            "description": "The app's Room DB version. Supported: 10, 11.",
+            "description": "The app's Room DB version. Supported: 13.",
             "required": true,
             "schema": {
               "type": "integer",
@@ -4331,7 +4331,7 @@
           {
             "name": "X-EasyStock-Schema-Version",
             "in": "header",
-            "description": "The app's Room DB version. Supported: 10, 11.",
+            "description": "The app's Room DB version. Supported: 13.",
             "required": true,
             "schema": {
               "type": "integer",
@@ -4549,7 +4549,7 @@
           {
             "name": "X-EasyStock-Schema-Version",
             "in": "header",
-            "description": "The app's Room DB version. Supported: 10, 11.",
+            "description": "The app's Room DB version. Supported: 13.",
             "required": true,
             "schema": {
               "type": "integer",
@@ -4657,7 +4657,7 @@
           {
             "name": "X-EasyStock-Schema-Version",
             "in": "header",
-            "description": "The app's Room DB version. Supported: 10, 11.",
+            "description": "The app's Room DB version. Supported: 13.",
             "required": true,
             "schema": {
               "type": "integer",
@@ -4805,7 +4805,7 @@
           {
             "name": "X-EasyStock-Schema-Version",
             "in": "header",
-            "description": "The app's Room DB version. Supported: 10, 11.",
+            "description": "The app's Room DB version. Supported: 13.",
             "required": true,
             "schema": {
               "type": "integer",
@@ -4968,7 +4968,7 @@
           {
             "name": "X-EasyStock-Schema-Version",
             "in": "header",
-            "description": "The app's Room DB version. Supported: 10, 11.",
+            "description": "The app's Room DB version. Supported: 13.",
             "required": true,
             "schema": {
               "type": "integer",
@@ -5111,7 +5111,7 @@
           {
             "name": "X-EasyStock-Schema-Version",
             "in": "header",
-            "description": "The app's Room DB version. Supported: 10, 11.",
+            "description": "The app's Room DB version. Supported: 13.",
             "required": true,
             "schema": {
               "type": "integer",
@@ -5223,7 +5223,7 @@
           {
             "name": "X-EasyStock-Schema-Version",
             "in": "header",
-            "description": "The app's Room DB version. Supported: 10, 11.",
+            "description": "The app's Room DB version. Supported: 13.",
             "required": true,
             "schema": {
               "type": "integer",
@@ -5444,7 +5444,7 @@
           {
             "name": "X-EasyStock-Schema-Version",
             "in": "header",
-            "description": "The app's Room DB version. Supported: 10, 11.",
+            "description": "The app's Room DB version. Supported: 13.",
             "required": true,
             "schema": {
               "type": "integer",
@@ -5679,7 +5679,7 @@
           {
             "name": "X-EasyStock-Schema-Version",
             "in": "header",
-            "description": "The app's Room DB version. Supported: 10, 11.",
+            "description": "The app's Room DB version. Supported: 13.",
             "required": true,
             "schema": {
               "type": "integer",
@@ -5816,7 +5816,7 @@
           {
             "name": "X-EasyStock-Schema-Version",
             "in": "header",
-            "description": "The app's Room DB version. Supported: 10, 11.",
+            "description": "The app's Room DB version. Supported: 13.",
             "required": true,
             "schema": {
               "type": "integer",

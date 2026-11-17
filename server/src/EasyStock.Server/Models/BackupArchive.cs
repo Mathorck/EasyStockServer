@@ -100,6 +100,7 @@ public sealed class BackupArchive : IDisposable
                 CategoryAttributes = await Table<BackupCategoryAttribute>(BackupTable.CategoryAttribute),
                 Locations = await Table<BackupLocation>(BackupTable.Location),
                 Articles = await Table<BackupArticle>(BackupTable.Article),
+                ArticleFlags = await Table<BackupArticleFlag>(BackupTable.ArticleFlag),
                 Items = await Table<BackupItem>(BackupTable.Item),
                 Movements = await Table<BackupStockMovement>(BackupTable.StockMovement),
                 Reviews = await Table<BackupStockReview>(BackupTable.StockReview),

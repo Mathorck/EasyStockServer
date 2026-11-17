@@ -8,6 +8,9 @@ public static class Permissions
     private static readonly Permission[] Read =
         [Permission.ViewStock, Permission.ViewHistory, Permission.ViewReviews, Permission.ReceiveAlerts];
 
+    /// <summary>Raising a flag is the one write a Viewer can do.</summary>
+    private static readonly Permission[] Flag = [Permission.FlagArticle];
+
     private static readonly Permission[] Write =
     [
         Permission.StockAction,
@@ -22,8 +25,8 @@ public static class Permissions
     private static readonly FrozenDictionary<Role, FrozenSet<Permission>> ByRole = new Dictionary<Role, FrozenSet<Permission>>
     {
         [Role.Admin] = Enum.GetValues<Permission>().ToFrozenSet(),
-        [Role.Member] = Read.Concat(Write).ToFrozenSet(),
-        [Role.Viewer] = Read.ToFrozenSet(),
+        [Role.Member] = Read.Concat(Flag).Concat(Write).ToFrozenSet(),
+        [Role.Viewer] = Read.Concat(Flag).ToFrozenSet(),
         [Role.Guest] = new[] { Permission.ViewStock }.ToFrozenSet(),
     }.ToFrozenDictionary();
 

@@ -70,7 +70,7 @@ public sealed class ApiFactory(
     {
         var client = CreateClient();
         client.DefaultRequestHeaders.Add("X-EasyStock-App-Version", "1.0.0");
-        client.DefaultRequestHeaders.Add("X-EasyStock-Schema-Version", "10");
+        client.DefaultRequestHeaders.Add("X-EasyStock-Schema-Version", "13");
         client.DefaultRequestHeaders.Add(RemoteIpHeader, remoteIp ?? RandomIp());
         if (accessToken != null) client.DefaultRequestHeaders.Authorization = new AuthenticationHeaderValue("Bearer", accessToken);
         return client;

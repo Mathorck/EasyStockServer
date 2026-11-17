@@ -64,6 +64,7 @@ public sealed partial class PullHandler(
             await AddAsync<CategoryAttribute>(PullTablesHelper.CategoryAttribute);
             await AddAsync<Location>(PullTablesHelper.Location);
             await AddAsync<Article>(PullTablesHelper.Article);
+            await AddAsync<ArticleFlag>(PullTablesHelper.ArticleFlag);
             await AddAsync<Item>(PullTablesHelper.Item);
             await AddAsync<StockMovement>(PullTablesHelper.StockMovement);
             await AddAsync<StockReview>(PullTablesHelper.StockReview);
@@ -129,7 +130,7 @@ public sealed partial class PullHandler(
         foreach (var c in kept)
             if (c.Row is PullUserChange u) byId[u.Id] = u.DisplayName;
 
-        var authors = kept.Select(c => (c.Row as StockMovement)?.CreatedBy)
+        var authors = kept.Select(c => (c.Row as StockMovement)?.CreatedBy ?? (c.Row as ArticleFlag)?.CreatedBy)
             .OfType<Guid>().Where(id => !byId.ContainsKey(id)).ToHashSet();
         if (authors.Count > 0)
             foreach (var (id, name) in await userDirectory.NamesAsync(authors, ct))

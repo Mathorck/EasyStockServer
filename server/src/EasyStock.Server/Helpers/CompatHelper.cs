@@ -9,8 +9,8 @@ public static class CompatHelper
 
     public const int ApiVersion = 1;
 
-    /// <summary>App DB (Room) versions accepted in X-EasyStock-Schema-Version: those whose shared tables this server matches (docs/schema.dbml). 11 only adds an app-only table, so 10 and 11 share the same synced tables.</summary>
-    public static readonly IReadOnlyList<int> SupportedSchemaVersions = [10, 11];
+    /// <summary>App DB (Room) versions accepted in X-EasyStock-Schema-Version: only the version whose shared tables this server matches (docs/schema.dbml). 13 adds article.order_url, the attribute_definition flag columns and the article_flag table.</summary>
+    public static readonly IReadOnlyList<int> SupportedSchemaVersions = [13];
 
     public static string ServerVersion { get; } =
         typeof(CompatHelper).Assembly.GetCustomAttribute<AssemblyInformationalVersionAttribute>()?.InformationalVersion

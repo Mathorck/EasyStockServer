@@ -254,6 +254,7 @@ public static class BackupMergeHelper
             var categoryAttributes = MergeCategoryAttributes(attributeIds);
             var locations = MergeLocations();
             var articles = MergeArticles();
+            var flags = MergeRows(local.ArticleFlags, incoming.ArticleFlags, x => x.Id, x => x.UpdatedAt);
             var items = MergeItems();
             var movements = MergeMovements();
             var reviews = MergeRows(local.Reviews, incoming.Reviews, x => x.Id, x => x.UpdatedAt);
@@ -282,6 +283,7 @@ public static class BackupMergeHelper
                 CategoryAttributes = categoryAttributes.Final.Values.ToList(),
                 Locations = locations.Final.Values.ToList(),
                 Articles = articles.Final.Values.ToList(),
+                ArticleFlags = flags.Final.Values.ToList(),
                 Items = items.Final.Values.ToList(),
                 Movements = movements.Final.Values.ToList(),
                 Reviews = reviews.Final.Values.ToList(),
@@ -299,6 +301,7 @@ public static class BackupMergeHelper
                     CategoryAttributes = categoryAttributes.Inserted.Values.ToList(),
                     Locations = BackupLocationsHelper.ParentsFirst(locations.Inserted.Values.ToList()),
                     Articles = articles.Inserted.Values.ToList(),
+                    ArticleFlags = flags.Inserted.Values.ToList(),
                     Items = items.Inserted.Values.ToList(),
                     Movements = movements.Inserted.Values.ToList(),
                     Reviews = reviews.Inserted.Values.ToList(),
@@ -311,6 +314,7 @@ public static class BackupMergeHelper
                     CategoryAttributes = categoryAttributes.Updated.Values.ToList(),
                     Locations = locations.Updated.Values.ToList(),
                     Articles = articles.Updated.Values.ToList(),
+                    ArticleFlags = flags.Updated.Values.ToList(),
                     Items = items.Updated.Values.ToList(),
                     Reviews = reviews.Updated.Values.ToList(),
                     ReviewLines = reviewLines.Updated.Values.ToList(),

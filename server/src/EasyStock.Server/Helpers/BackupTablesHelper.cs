@@ -18,6 +18,7 @@ public static class BackupTablesHelper
         BackupTable.CategoryAttribute => "category_attribute",
         BackupTable.Location => "location",
         BackupTable.Article => "article",
+        BackupTable.ArticleFlag => "article_flag",
         BackupTable.Item => "item",
         BackupTable.StockMovement => "stock_movement",
         BackupTable.StockReview => "stock_review",

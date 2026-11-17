@@ -14,6 +14,7 @@ public sealed record BackupData
     public IReadOnlyList<BackupCategoryAttribute> CategoryAttributes { get; init; } = [];
     public IReadOnlyList<BackupLocation> Locations { get; init; } = [];
     public IReadOnlyList<BackupArticle> Articles { get; init; } = [];
+    public IReadOnlyList<BackupArticleFlag> ArticleFlags { get; init; } = [];
     public IReadOnlyList<BackupItem> Items { get; init; } = [];
     public IReadOnlyList<BackupStockMovement> Movements { get; init; } = [];
     public IReadOnlyList<BackupStockReview> Reviews { get; init; } = [];
@@ -26,6 +27,7 @@ public sealed record BackupData
         BackupTable.CategoryAttribute => CategoryAttributes.Count,
         BackupTable.Location => Locations.Count,
         BackupTable.Article => Articles.Count,
+        BackupTable.ArticleFlag => ArticleFlags.Count,
         BackupTable.Item => Items.Count,
         BackupTable.StockMovement => Movements.Count,
         BackupTable.StockReview => Reviews.Count,

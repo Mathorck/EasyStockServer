@@ -17,7 +17,8 @@ public sealed class SyncPushController(PushHandler processor) : ControllerBase
     /// sent again by the same user gets the same answer and changes nothing.
     /// </summary>
     [HttpPost]
-    [RequirePermission(Permission.PushChanges)]
+    // Viewers can raise flags: PushHandler checks every other row against PushChanges.
+    [RequirePermission(Permission.FlagArticle)]
     [DatasetEpochCheck] // 409 dataset-reset on a stale epoch, before the body is read
     [PushBodyLimit] // 413 batch-too-large when Content-Length says so
     [RequestSizeLimit(PushHandler.MaxBodyBytes)] // the backstop for a body without Content-Length

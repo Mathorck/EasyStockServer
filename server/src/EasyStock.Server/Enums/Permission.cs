@@ -39,5 +39,8 @@ public enum Permission
 
     /// <summary>Users, invites, printed QR code, server backup, server settings.</summary>
     Administer,
+
+    /// <summary>Raise a flag on an article. Resolving, editing and deleting a flag need <see cref="PushChanges"/>.</summary>
+    FlagArticle,
 }
 

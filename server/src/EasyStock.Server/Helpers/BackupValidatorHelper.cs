@@ -29,6 +29,7 @@ public static class BackupValidatorHelper
         Ids(data.CategoryAttributes, x => x.Id, "category_attribute");
         var locations = Ids(data.Locations, x => x.Id, "location");
         var articles = Ids(data.Articles, x => x.Id, "article");
+        Ids(data.ArticleFlags, x => x.Id, "article_flag");
         var items = Ids(data.Items, x => x.Id, "item");
         Ids(data.Movements, x => x.Id, "stock_movement");
         var reviews = Ids(data.Reviews, x => x.Id, "stock_review");
@@ -47,9 +48,15 @@ public static class BackupValidatorHelper
         }
         foreach (var r in data.Articles)
         {
-            Text(r.Sku, 50); Text(r.Name, 255); Text(r.Description, int.MaxValue); Text(r.Tracking, 10); Text(r.Unit, 20); Text(r.Barcode, 64);
+            Text(r.Sku, 50); Text(r.Name, 255); Text(r.Description, int.MaxValue); Text(r.Tracking, 10); Text(r.Unit, 20); Text(r.Barcode, 64); Text(r.OrderUrl, 2048);
             if (!Trackings.Contains(r.Tracking)) Damaged("Unknown tracking");
             Json(r.Attributes, '{');
+        }
+        foreach (var r in data.ArticleFlags)
+        {
+            if (string.IsNullOrWhiteSpace(r.Note)) Damaged("Empty flag note");
+            Text(r.Note, PushRowValidatorHelper.FlagNoteMax);
+            if (r.CreatedBy is not null) Uuid(r.CreatedBy);
         }
         foreach (var r in data.Items)
         {
@@ -95,6 +102,8 @@ public static class BackupValidatorHelper
             if (r.CategoryId is not null && !categories.Contains(r.CategoryId)) Damaged("Unknown category");
             if (r.ImagePath is not null && !BackupFormatHelper.IsValidImagePath(r.ImagePath)) Damaged("Invalid image path");
         }
+        foreach (var r in data.ArticleFlags)
+            if (!articles.Contains(r.ArticleId)) Damaged("Unknown flag article");
         foreach (var r in data.Items)
         {
             if (!articles.Contains(r.ArticleId)) Damaged("Unknown item article");

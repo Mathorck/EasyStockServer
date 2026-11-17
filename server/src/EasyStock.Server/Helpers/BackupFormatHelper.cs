@@ -23,8 +23,12 @@ public static class BackupFormatHelper
     /// </summary>
     public static int ExportSchemaVersion => CompatHelper.SupportedSchemaVersions.Min();
 
-    /// <summary>Lowest schema version accepted when importing a backup: the oldest supported app's.</summary>
-    public static int MinImportSchemaVersion => CompatHelper.SupportedSchemaVersions.Min();
+    /// <summary>
+    /// Lowest schema version accepted when importing a backup. Independent of the sync header check
+    /// (CompatHelper.SupportedSchemaVersions): an old backup must stay importable. Missing tables and columns
+    /// read as empty or default (order_url null, both attribute flags false, no article_flag rows).
+    /// </summary>
+    public const int MinImportSchemaVersion = 10;
 
     /// <summary>Highest schema version accepted when importing a backup: the newest supported app's.</summary>
     public static int MaxImportSchemaVersion => CompatHelper.SupportedSchemaVersions.Max();

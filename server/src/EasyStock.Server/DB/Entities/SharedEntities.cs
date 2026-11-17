@@ -1,6 +1,6 @@
 namespace EasyStock.Server.DB.Entities;
 
-// The nine tables shared with the app. Source of truth: docs/schema.dbml in the app repository.
+// The ten tables shared with the app. Source of truth: docs/schema.dbml in the app repository.
 // Server rules (docs/03-server-spec.md, "Shared tables"):
 //   - timestamps are bigint epoch milliseconds UTC, like the app;
 //   - decimal(12,3) quantities are bigint thousandths (1.5 kg = 1500), like the app;
@@ -28,6 +28,8 @@ public sealed class AttributeDefinition
     public string DataType { get; set; } = "";
     public string? Unit { get; set; }
     public string? Options { get; set; }
+    public bool FlagWhenPast { get; set; }
+    public bool NotifyWhenPast { get; set; }
     public long CreatedAt { get; set; }
     public long UpdatedAt { get; set; }
     public long? DeletedAt { get; set; }
@@ -61,8 +63,24 @@ public sealed class Article
     public long? Threshold { get; set; }
     public string? ImageSha256 { get; set; }
     public string? Attributes { get; set; }
+    public string? OrderUrl { get; set; }
     public bool Archived { get; set; }
     public long CreatedAt { get; set; }
+    public long UpdatedAt { get; set; }
+    public long? DeletedAt { get; set; }
+    public long ServerSeq { get; set; }
+}
+
+/// <summary>A note raised on an article ("something is wrong"). Any member can raise one, only members resolve it.</summary>
+public sealed class ArticleFlag
+{
+    public Guid Id { get; set; }
+    public Guid ArticleId { get; set; }
+    public string Note { get; set; } = "";
+    public long CreatedAt { get; set; }
+    /// <summary>Set by the server from the access token on insert, never from the phone, kept on updates.</summary>
+    public Guid? CreatedBy { get; set; }
+    public long? ResolvedAt { get; set; }
     public long UpdatedAt { get; set; }
     public long? DeletedAt { get; set; }
     public long ServerSeq { get; set; }

@@ -24,6 +24,7 @@ public sealed class EasyStockDbContext(DbContextOptions<EasyStockDbContext> opti
     public DbSet<StockMovement> StockMovements => Set<StockMovement>();
     public DbSet<StockReview> StockReviews => Set<StockReview>();
     public DbSet<StockReviewLine> StockReviewLines => Set<StockReviewLine>();
+    public DbSet<ArticleFlag> ArticleFlags => Set<ArticleFlag>();
 
     // Server only.
     public DbSet<DeviceSession> DeviceSessions => Set<DeviceSession>();

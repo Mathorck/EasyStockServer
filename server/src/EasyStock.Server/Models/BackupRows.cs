@@ -40,7 +40,9 @@ public sealed record BackupAttributeDefinition(
     [property: JsonPropertyName("updated_at")] long UpdatedAt,
     [property: JsonPropertyName("unit")] string? Unit = null,
     [property: JsonPropertyName("options"), JsonConverter(typeof(RawJsonConverter))] string? Options = null,
-    [property: JsonPropertyName("deleted_at")] long? DeletedAt = null);
+    [property: JsonPropertyName("deleted_at")] long? DeletedAt = null,
+    [property: JsonPropertyName("flag_when_past")] bool FlagWhenPast = false,
+    [property: JsonPropertyName("notify_when_past")] bool NotifyWhenPast = false);
 
 public sealed record BackupCategoryAttribute(
     [property: JsonPropertyName("id")] string Id,
@@ -79,6 +81,17 @@ public sealed record BackupArticle(
     [property: JsonPropertyName("image_path")] string? ImagePath = null,
     [property: JsonPropertyName("attributes"), JsonConverter(typeof(RawJsonConverter))] string? Attributes = null,
     [property: JsonPropertyName("archived")] bool Archived = false,
+    [property: JsonPropertyName("deleted_at")] long? DeletedAt = null,
+    [property: JsonPropertyName("order_url")] string? OrderUrl = null);
+
+public sealed record BackupArticleFlag(
+    [property: JsonPropertyName("id")] string Id,
+    [property: JsonPropertyName("article_id")] string ArticleId,
+    [property: JsonPropertyName("note")] string Note,
+    [property: JsonPropertyName("created_at")] long CreatedAt,
+    [property: JsonPropertyName("updated_at")] long UpdatedAt,
+    [property: JsonPropertyName("created_by")] string? CreatedBy = null,
+    [property: JsonPropertyName("resolved_at")] long? ResolvedAt = null,
     [property: JsonPropertyName("deleted_at")] long? DeletedAt = null);
 
 public sealed record BackupItem(

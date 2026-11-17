@@ -194,6 +194,7 @@ public sealed partial class PushHandler(
         PushTablesHelper.CategoryAttribute => Ids<CategoryAttribute>(ids, ct),
         PushTablesHelper.Location => Ids<Location>(ids, ct),
         PushTablesHelper.Article => Ids<Article>(ids, ct),
+        PushTablesHelper.ArticleFlag => Ids<ArticleFlag>(ids, ct),
         PushTablesHelper.Item => Ids<Item>(ids, ct),
         PushTablesHelper.StockMovement => Ids<StockMovement>(ids, ct),
         PushTablesHelper.StockReview => Ids<StockReview>(ids, ct),
@@ -399,6 +400,10 @@ public sealed partial class PushHandler(
                     v => TakenAsync<Item>(i.Id, Lower<Item>(x => x.SerialNumber!, v), ct));
                 return new(SyncPushConflictHelper.SerialRenamed);
             }
+            case ArticleFlag f:
+                // The author is the token's on insert, then never changes. SetValues would otherwise null it.
+                f.CreatedBy = existing is ArticleFlag stored ? stored.CreatedBy : user.UserId;
+                return new();
             case StockMovement m:
                 // The author is the token's, whatever the phone sent.
                 m.CreatedBy = user.UserId;
@@ -462,6 +467,14 @@ public sealed partial class PushHandler(
                 return await ExistsAsync<Location>(l.ParentId, ct) ? null : missing;
             case Article a:
                 return await ExistsAsync<Category>(a.CategoryId, ct) ? null : missing;
+            case ArticleFlag f:
+            {
+                if (!await ExistsAsync<Article>(f.ArticleId, ct)) return missing;
+                // A flag cannot be raised on a deleted article. Editing or resolving an existing one stays possible.
+                var (flagId, articleId) = (f.Id, f.ArticleId);
+                if (await db.Set<ArticleFlag>().AnyAsync(x => x.Id == flagId, ct)) return null;
+                return await db.Set<Article>().AnyAsync(x => x.Id == articleId && x.DeletedAt != null, ct) ? missing : null;
+            }
             case Item i:
                 return await ExistsAsync<Article>(i.ArticleId, ct) && await ExistsAsync<Location>(i.LocationId, ct) ? null : missing;
             case StockMovement m:
@@ -540,9 +553,12 @@ public sealed partial class PushHandler(
     /// <summary>An accepted movement comes back with its author fields: the phone learns the author the server set.</summary>
     private static SyncPushResult Accepted(string table, string id, object serverRow) =>
         new(table, id, SyncPushStatusHelper.Accepted, ServerSeq: PushRowCodecHelper.ServerSeqOf(serverRow),
-            Row: serverRow is StockMovement m
-                ? new JsonObject { ["id"] = m.Id, ["createdBy"] = m.CreatedBy, ["deviceId"] = m.DeviceId }
-                : null);
+            Row: serverRow switch
+            {
+                StockMovement m => new JsonObject { ["id"] = m.Id, ["createdBy"] = m.CreatedBy, ["deviceId"] = m.DeviceId },
+                ArticleFlag f => new JsonObject { ["id"] = f.Id, ["createdBy"] = f.CreatedBy },
+                _ => null,
+            });
 
     private static SyncPushResult Changed(string table, string id, string conflict, JsonObject? row, object? serverRow) =>
         new(table, id, SyncPushStatusHelper.Changed, Conflict: conflict, Row: row,

@@ -18,6 +18,7 @@ internal static class PullTablesHelper
     public const string Location = "location";
     public const string Article = "article";
     public const string Item = "item";
+    public const string ArticleFlag = "article_flag";
     public const string StockMovement = "stock_movement";
     public const string StockReview = "stock_review";
     public const string StockReviewLine = "stock_review_line";

@@ -2,7 +2,7 @@ using EasyStock.Server.DB.Entities;
 
 namespace EasyStock.Server.Helpers;
 
-/// <summary>The nine shared tables as the wire names them, in the order a push applies them.</summary>
+/// <summary>The ten shared tables as the wire names them, in the order a push applies them.</summary>
 public static class PushTablesHelper
 {
     public const string Category = "category";
@@ -11,6 +11,7 @@ public static class PushTablesHelper
     public const string Location = "location";
     public const string Article = "article";
     public const string Item = "item";
+    public const string ArticleFlag = "article_flag";
     public const string StockMovement = "stock_movement";
     public const string StockReview = "stock_review";
     public const string StockReviewLine = "stock_review_line";
@@ -18,7 +19,7 @@ public static class PushTablesHelper
     /// <summary>Dependency order: a row only references rows of the tables before it (or its own, for locations).</summary>
     public static readonly IReadOnlyList<string> PushOrder =
     [
-        Category, AttributeDefinition, CategoryAttribute, Location, Article, Item, StockMovement, StockReview, StockReviewLine,
+        Category, AttributeDefinition, CategoryAttribute, Location, Article, ArticleFlag, Item, StockMovement, StockReview, StockReviewLine,
     ];
 
     public static Type? EntityType(string table) => table switch
@@ -28,6 +29,7 @@ public static class PushTablesHelper
         CategoryAttribute => typeof(CategoryAttribute),
         Location => typeof(Location),
         Article => typeof(Article),
+        ArticleFlag => typeof(ArticleFlag),
         Item => typeof(Item),
         StockMovement => typeof(StockMovement),
         StockReview => typeof(StockReview),
@@ -43,6 +45,7 @@ public static class PushTablesHelper
         CategoryAttribute => ["createdAt", "updatedAt", "categoryId", "attributeId"],
         Location => ["createdAt", "updatedAt", "name"],
         Article => ["createdAt", "updatedAt", "name"],
+        ArticleFlag => ["createdAt", "updatedAt", "articleId", "note"],
         Item => ["createdAt", "updatedAt", "articleId"],
         StockMovement => ["createdAt", "articleId", "locationId", "quantity", "reason", "occurredAt"],
         StockReview => ["createdAt", "updatedAt", "locationId", "startedAt"],

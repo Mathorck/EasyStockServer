@@ -12,6 +12,7 @@ public enum BackupTable
     CategoryAttribute,
     Location,
     Article,
+    ArticleFlag,
     Item,
     StockMovement,
     StockReview,

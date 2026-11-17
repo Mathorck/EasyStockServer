@@ -12,7 +12,7 @@ public sealed class BackupArchiveTests
 {
     private static string NewId() => Guid.NewGuid().ToString("D");
 
-    private static byte[] Manifest(int schemaVersion = 10) => JsonSerializer.SerializeToUtf8Bytes(new Dictionary<string, object?>
+    private static byte[] Manifest(int schemaVersion = 13) => JsonSerializer.SerializeToUtf8Bytes(new Dictionary<string, object?>
     {
         ["format"] = "easystock-backup", ["format_version"] = 1, ["app_version"] = "1.0.0", ["schema_version"] = schemaVersion,
         ["created_at"] = "2026-01-01T00:00:00Z",
@@ -112,9 +112,9 @@ public sealed class BackupArchiveTests
     // ---- manifest and rows ---------------------------------------------------------------------------------------
 
     [Fact]
-    public async Task A_schema_version_below_the_oldest_supported_is_refused()
+    public async Task A_schema_version_below_the_oldest_importable_is_refused()
     {
-        var oldest = CompatHelper.SupportedSchemaVersions.Min();
+        var oldest = BackupFormatHelper.MinImportSchemaVersion;
         using (var file = Zip(("manifest.json", Manifest(oldest - 1))))
             Assert.Equal(BackupError.Damaged, await Refusal(file));
         using (var file = Zip(("manifest.json", Manifest(oldest))))

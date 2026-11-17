@@ -20,7 +20,7 @@ public sealed class PullUserDirectoryHandler(EasyStockDbContext db) : IPullUserD
         // changed author is sent even without a movement in the page, so renames and "Deleted user" still reach
         // phones that already hold their movements.
         var rows = await db.Users.AsNoTracking()
-            .Where(u => u.ServerSeq > since && db.StockMovements.Any(m => m.CreatedBy == u.Id))
+            .Where(u => u.ServerSeq > since && (db.StockMovements.Any(m => m.CreatedBy == u.Id) || db.ArticleFlags.Any(f => f.CreatedBy == u.Id)))
             .OrderBy(u => u.ServerSeq)
             .Take(take)
             .Select(u => new { u.Id, u.DisplayName, u.DeletedAt, u.ServerSeq })

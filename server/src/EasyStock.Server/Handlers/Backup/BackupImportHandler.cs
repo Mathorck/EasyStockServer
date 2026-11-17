@@ -146,6 +146,7 @@ public sealed class BackupImportHandler(
         CategoryAttributes = (await db.CategoryAttributes.AsNoTracking().OrderBy(x => x.Id).ToListAsync(ct)).Select(x => x.ToRow()).ToList(),
         Locations = (await db.Locations.AsNoTracking().OrderBy(x => x.Id).ToListAsync(ct)).Select(x => x.ToRow()).ToList(),
         Articles = (await db.Articles.AsNoTracking().OrderBy(x => x.Id).ToListAsync(ct)).Select(x => x.ToRow()).ToList(),
+        ArticleFlags = (await db.ArticleFlags.AsNoTracking().OrderBy(x => x.Id).ToListAsync(ct)).Select(x => x.ToRow()).ToList(),
         Items = (await db.Items.AsNoTracking().OrderBy(x => x.Id).ToListAsync(ct)).Select(x => x.ToRow()).ToList(),
         Movements = (await db.StockMovements.AsNoTracking().OrderBy(x => x.Id).ToListAsync(ct)).Select(x => x.ToRow()).ToList(),
         Reviews = (await db.StockReviews.AsNoTracking().OrderBy(x => x.Id).ToListAsync(ct)).Select(x => x.ToRow()).ToList(),
@@ -192,6 +193,9 @@ public sealed class BackupImportHandler(
         }
         db.Articles.AddRange(d.Articles.Select(r => r.ToEntity(hashes)));
         await db.SaveChangesAsync(ct);
+        var flags = d.ArticleFlags.Select(r => r.ToEntity()).ToList();
+        await ClearUnknownAuthorsAsync(flags, ct);
+        db.ArticleFlags.AddRange(flags);
         db.Items.AddRange(d.Items.Select(r => r.ToEntity()));
         await db.SaveChangesAsync(ct);
         db.StockMovements.AddRange(d.Movements.Select(r => r.ToEntity()));
@@ -202,6 +206,15 @@ public sealed class BackupImportHandler(
         db.ChangeTracker.Clear();
     }
 
+    /// <summary>A file can be foreign or crafted: a flag keeps its author only when that user exists on this server.</summary>
+    private async Task ClearUnknownAuthorsAsync(List<DB.Entities.ArticleFlag> flags, CancellationToken ct)
+    {
+        var wanted = flags.Where(f => f.CreatedBy is not null).Select(f => f.CreatedBy!.Value).Distinct().ToList();
+        if (wanted.Count == 0) return;
+        var known = (await db.Users.Where(u => wanted.Contains(u.Id)).Select(u => u.Id).ToListAsync(ct)).ToHashSet();
+        foreach (var f in flags.Where(f => f.CreatedBy is { } id && !known.Contains(id))) f.CreatedBy = null;
+    }
+
     private async Task UpdateAsync(BackupData d, Dictionary<string, string> hashes, CancellationToken ct)
     {
         db.Categories.UpdateRange(d.Categories.Select(r => r.ToEntity()));
@@ -210,6 +223,11 @@ public sealed class BackupImportHandler(
         db.Locations.UpdateRange(d.Locations.Select(r => r.ToEntity()));
         db.Articles.UpdateRange(d.Articles.Select(r => r.ToEntity(hashes)));
         db.Items.UpdateRange(d.Items.Select(r => r.ToEntity()));
+        foreach (var flag in d.ArticleFlags.Select(r => r.ToEntity()))
+        {
+            db.ArticleFlags.Update(flag);
+            db.Entry(flag).Property(x => x.CreatedBy).IsModified = false; // the author never changes
+        }
         db.StockReviews.UpdateRange(d.Reviews.Select(r => r.ToEntity()));
         db.StockReviewLines.UpdateRange(d.ReviewLines.Select(r => r.ToEntity()));
         await db.SaveChangesAsync(ct);

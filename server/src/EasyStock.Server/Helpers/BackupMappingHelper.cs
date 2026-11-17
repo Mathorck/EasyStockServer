@@ -20,7 +20,7 @@ internal static class BackupMappingHelper
         new(Id(e.Id), e.Name, e.CreatedAt, e.UpdatedAt, e.Description, e.NameTemplate, e.DeletedAt);
 
     public static BackupAttributeDefinition ToRow(this AttributeDefinition e) =>
-        new(Id(e.Id), e.Key, e.Label, e.DataType, e.CreatedAt, e.UpdatedAt, e.Unit, e.Options, e.DeletedAt);
+        new(Id(e.Id), e.Key, e.Label, e.DataType, e.CreatedAt, e.UpdatedAt, e.Unit, e.Options, e.DeletedAt, e.FlagWhenPast, e.NotifyWhenPast);
 
     public static BackupCategoryAttribute ToRow(this CategoryAttribute e) =>
         new(Id(e.Id), Id(e.CategoryId), Id(e.AttributeId), e.CreatedAt, e.UpdatedAt, e.Required, e.SortOrder, e.DeletedAt);
@@ -30,7 +30,10 @@ internal static class BackupMappingHelper
 
     public static BackupArticle ToRow(this Article e) =>
         new(Id(e.Id), e.Name, e.CreatedAt, e.UpdatedAt, e.Sku, e.NameAuto, e.Description, Id(e.CategoryId), e.Tracking, e.Unit,
-            e.Barcode, e.Threshold, e.ImageSha256 is null ? null : BackupFormatHelper.ImagePathFor(e.ImageSha256), e.Attributes, e.Archived, e.DeletedAt);
+            e.Barcode, e.Threshold, e.ImageSha256 is null ? null : BackupFormatHelper.ImagePathFor(e.ImageSha256), e.Attributes, e.Archived, e.DeletedAt, e.OrderUrl);
+
+    public static BackupArticleFlag ToRow(this ArticleFlag e) =>
+        new(Id(e.Id), Id(e.ArticleId), e.Note, e.CreatedAt, e.UpdatedAt, Id(e.CreatedBy), e.ResolvedAt, e.DeletedAt);
 
     public static BackupItem ToRow(this Item e) =>
         new(Id(e.Id), Id(e.ArticleId), e.CreatedAt, e.UpdatedAt, e.SerialNumber, e.Status, Id(e.LocationId), e.Attributes, e.Archived, e.DeletedAt);
@@ -57,6 +60,7 @@ internal static class BackupMappingHelper
     public static AttributeDefinition ToEntity(this BackupAttributeDefinition r) => new()
     {
         Id = G(r.Id), Key = r.Key, Label = r.Label, DataType = r.DataType, Unit = r.Unit, Options = r.Options,
+        FlagWhenPast = r.FlagWhenPast, NotifyWhenPast = r.NotifyWhenPast,
         CreatedAt = r.CreatedAt, UpdatedAt = r.UpdatedAt, DeletedAt = r.DeletedAt,
     };
 
@@ -77,7 +81,14 @@ internal static class BackupMappingHelper
         Id = G(r.Id), Sku = r.Sku, Name = r.Name, NameAuto = r.NameAuto, Description = r.Description, CategoryId = N(r.CategoryId),
         Tracking = r.Tracking, Unit = r.Unit, Barcode = r.Barcode, Threshold = r.Threshold,
         ImageSha256 = r.ImagePath is not null && imageHashes.TryGetValue(r.ImagePath, out var sha) ? sha : null,
-        Attributes = r.Attributes, Archived = r.Archived, CreatedAt = r.CreatedAt, UpdatedAt = r.UpdatedAt, DeletedAt = r.DeletedAt,
+        Attributes = r.Attributes, OrderUrl = r.OrderUrl, Archived = r.Archived, CreatedAt = r.CreatedAt, UpdatedAt = r.UpdatedAt, DeletedAt = r.DeletedAt,
+    };
+
+    /// <summary>Unlike a movement's, a flag's <c>created_by</c> is kept ; the import handler nulls an author unknown to this server, and the update path keeps the stored author.</summary>
+    public static ArticleFlag ToEntity(this BackupArticleFlag r) => new()
+    {
+        Id = G(r.Id), ArticleId = G(r.ArticleId), Note = r.Note, ResolvedAt = r.ResolvedAt, CreatedBy = N(r.CreatedBy),
+        CreatedAt = r.CreatedAt, UpdatedAt = r.UpdatedAt, DeletedAt = r.DeletedAt,
     };
 
     public static Item ToEntity(this BackupItem r) => new()

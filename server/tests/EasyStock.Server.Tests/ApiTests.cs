@@ -31,7 +31,7 @@ public sealed class ApiTests(PostgresFixture pg) : IDisposable
                      "supportedSchemaVersions", "setupDone", "hasData", "guestSignupEnabled" })
             Assert.True(root.TryGetProperty(name, out _), $"missing {name}");
         Assert.Equal("0.0.0", root.GetProperty("minAppVersion").GetString());
-        Assert.Equal([10, 11], root.GetProperty("supportedSchemaVersions").EnumerateArray().Select(e => e.GetInt32()));
+        Assert.Equal([13], root.GetProperty("supportedSchemaVersions").EnumerateArray().Select(e => e.GetInt32()));
     }
 
     [Fact]
@@ -50,7 +50,7 @@ public sealed class ApiTests(PostgresFixture pg) : IDisposable
         var response = await _factory.CreateClient().GetAsync("/api/v1/anything", TestContext.Current.CancellationToken);
         using var doc = JsonDocument.Parse(await response.Content.ReadAsStringAsync(TestContext.Current.CancellationToken));
         Assert.Equal("0.0.0", doc.RootElement.GetProperty("minAppVersion").GetString());
-        Assert.Equal([10, 11], doc.RootElement.GetProperty("supportedSchemaVersions").EnumerateArray().Select(e => e.GetInt32()));
+        Assert.Equal([13], doc.RootElement.GetProperty("supportedSchemaVersions").EnumerateArray().Select(e => e.GetInt32()));
     }
 
     [Theory]
@@ -83,10 +83,12 @@ public sealed class ApiTests(PostgresFixture pg) : IDisposable
     }
 
     [Theory]
-    [InlineData("10", HttpStatusCode.NotFound)]
-    [InlineData("11", HttpStatusCode.NotFound)]
+    [InlineData("10", (HttpStatusCode)426)]
+    [InlineData("11", (HttpStatusCode)426)]
     [InlineData("12", (HttpStatusCode)426)]
-    public async Task Schema_versions_10_and_11_are_accepted_and_12_is_refused(string schema, HttpStatusCode expected)
+    [InlineData("13", HttpStatusCode.NotFound)]
+    [InlineData("14", (HttpStatusCode)426)]
+    public async Task Only_schema_version_13_is_accepted(string schema, HttpStatusCode expected)
     {
         var client = _factory.CreateClient();
         client.DefaultRequestHeaders.Add("X-EasyStock-App-Version", "1.0.0");
